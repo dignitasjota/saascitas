@@ -5,10 +5,11 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { hash } from '@node-rs/argon2';
+import { hash, verify } from '@node-rs/argon2';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateProfileDto, ChangePasswordDto } from './dto/update-profile.dto';
 
 const ARGON2_OPTIONS = { memoryCost: 19456, timeCost: 2, parallelism: 1 };
 
@@ -129,6 +130,44 @@ export class UsersService {
     });
 
     return updated;
+  }
+
+  async getProfile(tenantId: string, id: string) {
+    return this.findOne(tenantId, id);
+  }
+
+  async updateProfile(tenantId: string, id: string, dto: UpdateProfileDto) {
+    const user = await this.prisma.user.findFirst({
+      where: { id, tenantId, deletedAt: null },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        phone: dto.phone,
+      },
+      select: USER_SELECT,
+    });
+  }
+
+  async changePassword(tenantId: string, id: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findFirst({
+      where: { id, tenantId, deletedAt: null },
+      select: { id: true, passwordHash: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const valid = await verify(user.passwordHash, dto.currentPassword);
+    if (!valid) throw new BadRequestException('La contraseña actual es incorrecta');
+
+    const newHash = await hash(dto.newPassword, ARGON2_OPTIONS);
+    await this.prisma.user.update({
+      where: { id },
+      data: { passwordHash: newHash },
+    });
   }
 
   async remove(tenantId: string, id: string, requesterId: string, requesterRole: string) {

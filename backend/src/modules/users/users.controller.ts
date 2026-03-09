@@ -12,21 +12,51 @@ import {
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateProfileDto, ChangePasswordDto } from './dto/update-profile.dto';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 
 @Controller('users')
-@Roles('owner', 'admin')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  // ─── Profile (any authenticated user) ──────────────────────────────────────
+
+  @Get('me')
+  async getProfile(@CurrentUser() user: JwtPayload) {
+    const data = await this.usersService.getProfile(user.tid, user.sub);
+    return { data };
+  }
+
+  @Patch('me')
+  async updateProfile(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    const data = await this.usersService.updateProfile(user.tid, user.sub, dto);
+    return { data };
+  }
+
+  @Post('me/change-password')
+  @HttpCode(204)
+  async changePassword(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    await this.usersService.changePassword(user.tid, user.sub, dto);
+  }
+
+  // ─── User management (owner + admin) ───────────────────────────────────────
+
   @Get()
+  @Roles('owner', 'admin')
   async findAll(@CurrentUser() user: JwtPayload) {
     const data = await this.usersService.findAll(user.tid);
     return { data };
   }
 
   @Get(':id')
+  @Roles('owner', 'admin')
   async findOne(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -46,6 +76,7 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @Roles('owner', 'admin')
   async update(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,

@@ -78,8 +78,12 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
 
       {/* User footer */}
       <div className="border-t px-3 py-3">
-        <div className="flex items-center gap-3 mb-2">
-          <Avatar className="h-8 w-8">
+        <Link
+          href="/profile"
+          onClick={onNavClick}
+          className="flex items-center gap-3 mb-2 rounded-lg px-1 py-1 hover:bg-muted transition-colors"
+        >
+          <Avatar className="h-8 w-8 shrink-0">
             <AvatarFallback className="text-xs">
               {getInitials(user?.firstName ?? '', user?.lastName)}
             </AvatarFallback>
@@ -90,7 +94,7 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
             </p>
             <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
           </div>
-        </div>
+        </Link>
         <Button
           variant="ghost"
           size="sm"
