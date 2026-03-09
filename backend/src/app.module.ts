@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -23,6 +24,10 @@ import { BillingModule } from './modules/billing/billing.module';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    // Rate limiting: default 100 req/min, override per route with @Throttle()
+    ThrottlerModule.forRoot([
+      { name: 'default', ttl: 60_000, limit: 100 },
+    ]),
     PrismaModule,
     AuthModule,
     TenantsModule,
@@ -37,6 +42,8 @@ import { BillingModule } from './modules/billing/billing.module';
     BillingModule,
   ],
   providers: [
+    // Rate limit guard (global)
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     // Global auth guard — all routes require JWT unless @Public()
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     // Global roles guard — check @Roles() decorator

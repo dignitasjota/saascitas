@@ -31,7 +31,8 @@ export function useRegister() {
     },
     onSuccess: (data) => {
       setAuth(data.user, data.tenant, data.accessToken, data.refreshToken)
-      router.push('/dashboard')
+      // Send new users to onboarding wizard
+      router.push('/onboarding')
     },
     onError: (error: any) => {
       const msg = error?.response?.data?.detail || 'Error al crear la cuenta'
@@ -51,7 +52,7 @@ export function useLogin() {
     },
     onSuccess: (data) => {
       setAuth(data.user, data.tenant, data.accessToken, data.refreshToken)
-      router.push('/dashboard')
+      router.push('/')
     },
     onError: (error: any) => {
       const msg = error?.response?.data?.detail || 'Credenciales incorrectas'

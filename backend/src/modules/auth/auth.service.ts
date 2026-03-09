@@ -110,6 +110,22 @@ export class AuthService {
       result.user.role,
     );
 
+    // Send welcome email (fire-and-forget)
+    const frontendUrl = this.config.get('FRONTEND_URL', 'http://localhost:3000');
+    void this.mailer
+      .sendMail({
+        to: result.user.email,
+        subject: `¡Bienvenido a SaaS Citas, ${result.user.firstName}!`,
+        template: 'welcome',
+        context: {
+          name: result.user.firstName,
+          businessName: result.tenant.name,
+          bookingUrl: `${frontendUrl}/book/${result.tenant.slug}`,
+          dashboardUrl: frontendUrl,
+        },
+      })
+      .catch((err) => this.logger.error(`Welcome email failed: ${err}`));
+
     return {
       user: {
         id: result.user.id,

@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, CalendarDays, Clock, CheckCircle2, XCircle } from 'lucide-react'
+import Link from 'next/link'
+import { useQuery } from '@tanstack/react-query'
+import { Plus, CalendarDays, Clock, CheckCircle2, XCircle, Rocket } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -10,12 +12,24 @@ import { NewAppointmentDialog } from '@/components/appointments/new-appointment-
 import { useToday } from '@/hooks/use-appointments'
 import { useAuthStore } from '@/stores/auth-store'
 import { formatDate } from '@/lib/utils'
+import apiClient from '@/lib/api-client'
 
 export default function DashboardPage() {
   const [showNew, setShowNew] = useState(false)
   const { user } = useAuthStore()
   const today = new Date().toISOString().split('T')[0]
   const { data: appointments = [], isLoading } = useToday()
+
+  // Show onboarding banner if no services yet
+  const { data: services } = useQuery({
+    queryKey: ['services-count'],
+    queryFn: async () => {
+      const res = await apiClient.get('/services')
+      return res.data.data as any[]
+    },
+    staleTime: 30_000,
+  })
+  const showOnboardingBanner = services !== undefined && services.length === 0
 
   const pending   = appointments.filter(a => a.status === 'pending').length
   const confirmed = appointments.filter(a => a.status === 'confirmed' || a.status === 'in_progress').length
@@ -24,6 +38,24 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* Onboarding banner */}
+      {showOnboardingBanner && (
+        <div className="flex items-center gap-4 rounded-xl border border-blue-200 bg-blue-50 p-4">
+          <div className="rounded-lg bg-blue-600 p-2 shrink-0">
+            <Rocket className="h-5 w-5 text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-blue-900 text-sm">¡Completa la configuración inicial!</p>
+            <p className="text-blue-700 text-xs mt-0.5">
+              Añade tus servicios y horario para que los clientes puedan reservar online.
+            </p>
+          </div>
+          <Link href="/onboarding">
+            <Button size="sm" className="shrink-0">Configurar</Button>
+          </Link>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>

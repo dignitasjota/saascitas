@@ -1,4 +1,5 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -7,6 +8,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { Public } from '../../common/decorators/public.decorator';
 
 @Controller('auth')
+@Throttle({ default: { ttl: 60_000, limit: 10 } }) // 10 req/min on all auth endpoints
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
@@ -26,6 +28,7 @@ export class AuthController {
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @SkipThrottle() // refresh is called automatically, don't rate-limit it
   async refresh(@Body('refreshToken') refreshToken: string) {
     return { data: await this.authService.refresh(refreshToken) };
   }
