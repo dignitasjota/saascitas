@@ -88,4 +88,36 @@ export class CustomersService {
       data: { deletedAt: new Date() },
     });
   }
+
+  async exportCsv(tenantId: string): Promise<string> {
+    const rows = await this.prisma.customer.findMany({
+      where: { tenantId, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const escape = (v: string | null | undefined) =>
+      v == null ? '' : `"${String(v).replace(/"/g, '""')}"`;
+
+    const header = [
+      'ID', 'Nombre', 'Apellidos', 'Email', 'Teléfono',
+      'Dirección', 'Ciudad', 'Código postal',
+      'Total citas', 'Última cita', 'Creado',
+    ].join(',');
+
+    const lines = rows.map((c) => [
+      escape(c.id),
+      escape(c.firstName),
+      escape(c.lastName),
+      escape(c.email),
+      escape(c.phone),
+      escape(c.address),
+      escape(c.city),
+      escape(c.postalCode),
+      c.totalAppointments,
+      c.lastAppointmentAt ? c.lastAppointmentAt.toISOString().split('T')[0] : '',
+      c.createdAt.toISOString().split('T')[0],
+    ].join(','));
+
+    return [header, ...lines].join('\r\n');
+  }
 }

@@ -6,7 +6,9 @@ import {
   Param,
   Body,
   Query,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { AppointmentsService } from './appointments.service';
 import { AvailabilityService } from './availability.service';
 import {
@@ -66,6 +68,20 @@ export class AppointmentsController {
   ) {
     const data = await this.appointmentsService.getToday(user.tid, employeeId);
     return { data };
+  }
+
+  @Get('export')
+  async exportCsv(
+    @CurrentUser() user: JwtPayload,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Res() res: Response,
+  ) {
+    const csv = await this.appointmentsService.exportCsv(user.tid, from, to);
+    const filename = `citas_${new Date().toISOString().split('T')[0]}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send('\uFEFF' + csv); // BOM for Excel UTF-8 detection
   }
 
   @Get('availability')

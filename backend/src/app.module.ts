@@ -18,6 +18,7 @@ import { BookingModule } from './modules/booking/booking.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { BillingModule } from './modules/billing/billing.module';
+import { AdminModule } from './modules/admin/admin.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { BillingModule } from './modules/billing/billing.module';
     NotificationsModule,
     MetricsModule,
     BillingModule,
+    AdminModule,
   ],
   providers: [
     // Rate limit guard (global)

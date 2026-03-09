@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AppointmentCard } from '@/components/appointments/appointment-card'
@@ -10,9 +10,11 @@ import { useQuery } from '@tanstack/react-query'
 import apiClient from '@/lib/api-client'
 import type { Appointment } from '@/types/api'
 import { format, subDays, addDays } from 'date-fns'
+import { downloadCsv } from '@/lib/csv'
 
 export default function AppointmentsPage() {
   const [showNew, setShowNew] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const from = format(subDays(new Date(), 1), 'yyyy-MM-dd')
   const to   = format(addDays(new Date(), 30), 'yyyy-MM-dd')
@@ -25,13 +27,28 @@ export default function AppointmentsPage() {
     },
   })
 
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      await downloadCsv('/appointments/export', `citas_${from}_${to}.csv`, { from, to })
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Citas</h1>
-        <Button onClick={() => setShowNew(true)}>
-          <Plus className="h-4 w-4 mr-2" /> Nueva cita
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
+            <Download className="h-4 w-4 mr-2" />
+            {exporting ? 'Exportando...' : 'Exportar CSV'}
+          </Button>
+          <Button onClick={() => setShowNew(true)}>
+            <Plus className="h-4 w-4 mr-2" /> Nueva cita
+          </Button>
+        </div>
       </div>
 
       {isLoading && (

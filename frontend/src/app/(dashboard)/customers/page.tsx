@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, Search, Phone, Mail, CalendarDays } from 'lucide-react'
+import { Plus, Search, Phone, Mail, CalendarDays, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { downloadCsv } from '@/lib/csv'
 
 const schema = z.object({
   firstName: z.string().min(1, 'Nombre requerido'),
@@ -29,16 +30,32 @@ type FormData = z.infer<typeof schema>
 export default function CustomersPage() {
   const [search, setSearch] = useState('')
   const [showNew, setShowNew] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const { data, isLoading } = useCustomers(search || undefined)
   const customers = data?.data ?? []
+
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      await downloadCsv('/customers/export', `clientes_${new Date().toISOString().split('T')[0]}.csv`)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Clientes</h1>
-        <Button onClick={() => setShowNew(true)}>
-          <Plus className="h-4 w-4 mr-2" /> Nuevo cliente
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
+            <Download className="h-4 w-4 mr-2" />
+            {exporting ? 'Exportando...' : 'Exportar CSV'}
+          </Button>
+          <Button onClick={() => setShowNew(true)}>
+            <Plus className="h-4 w-4 mr-2" /> Nuevo cliente
+          </Button>
+        </div>
       </div>
 
       {/* Search */}

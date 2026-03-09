@@ -36,3 +36,10 @@ npm-debug.log*
 # OS
 Thumbs.db
 *.tsbuildinfo
+
+# SSL certs (generated on server)
+nginx/certs/
+
+# Production secrets
+.env.prod
+docker-compose.override.yml

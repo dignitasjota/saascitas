@@ -7,7 +7,9 @@ import {
   Body,
   Param,
   Query,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { CustomersService } from './customers.service';
 import { CreateCustomerDto, UpdateCustomerDto } from './dto/create-customer.dto';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -24,6 +26,18 @@ export class CustomersController {
     @Query('cursor') cursor?: string,
   ) {
     return this.customersService.findAll(user.tid, search, limit, cursor);
+  }
+
+  @Get('export')
+  async exportCsv(
+    @CurrentUser() user: JwtPayload,
+    @Res() res: Response,
+  ) {
+    const csv = await this.customersService.exportCsv(user.tid);
+    const filename = `clientes_${new Date().toISOString().split('T')[0]}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send('\uFEFF' + csv);
   }
 
   @Get(':id')

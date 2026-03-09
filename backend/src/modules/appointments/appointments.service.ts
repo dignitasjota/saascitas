@@ -295,4 +295,55 @@ export class AppointmentsService {
       employeeId,
     );
   }
+
+  async exportCsv(
+    tenantId: string,
+    from?: string,
+    to?: string,
+  ): Promise<string> {
+    const where: any = { tenantId };
+    if (from || to) {
+      where.startsAt = {};
+      if (from) where.startsAt.gte = new Date(from);
+      if (to) where.startsAt.lte = new Date(to);
+    }
+
+    const rows = await this.prisma.appointment.findMany({
+      where,
+      include: {
+        customer: { select: { firstName: true, lastName: true, phone: true, email: true } },
+        employee: { select: { firstName: true, lastName: true } },
+        service:  { select: { name: true } },
+      },
+      orderBy: { startsAt: 'asc' },
+    });
+
+    const escape = (v: string | null | undefined) =>
+      v == null ? '' : `"${String(v).replace(/"/g, '""')}"`;
+
+    const header = [
+      'ID', 'Fecha', 'Hora inicio', 'Hora fin',
+      'Cliente', 'Email cliente', 'Teléfono cliente',
+      'Servicio', 'Empleado', 'Estado',
+      'Duración (min)', 'Precio (€)', 'Notas',
+    ].join(',');
+
+    const lines = rows.map((a) => [
+      escape(a.id),
+      escape(a.startsAt.toISOString().split('T')[0]),
+      escape(a.startsAt.toTimeString().slice(0, 5)),
+      escape(a.endsAt.toTimeString().slice(0, 5)),
+      escape(`${a.customer.firstName} ${a.customer.lastName}`),
+      escape(a.customer.email),
+      escape(a.customer.phone),
+      escape(a.service?.name ?? ''),
+      escape(`${a.employee.firstName} ${a.employee.lastName}`),
+      escape(a.status),
+      a.durationMinutes,
+      a.priceCents != null ? (a.priceCents / 100).toFixed(2) : '',
+      escape(a.notes),
+    ].join(','));
+
+    return [header, ...lines].join('\r\n');
+  }
 }

@@ -1,0 +1,371 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import {
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
+import { AppointmentsService } from './appointments.service';
+import { AvailabilityService } from './availability.service';
+import { PrismaService } from '../../common/prisma/prisma.service';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const TENANT = 'tenant-1';
+const now = new Date('2026-03-10T10:00:00.000Z');
+const later = new Date('2026-03-10T11:00:00.000Z');
+
+const makeAppointment = (overrides = {}) => ({
+  id: 'appt-1',
+  tenantId: TENANT,
+  employeeId: 'emp-1',
+  customerId: 'cust-1',
+  serviceId: 'svc-1',
+  startsAt: now,
+  endsAt: later,
+  durationMinutes: 60,
+  status: 'pending',
+  priceCents: 5000,
+  source: 'manual',
+  address: null,
+  city: null,
+  postalCode: null,
+  notes: null,
+  customerNotes: null,
+  cancelledAt: null,
+  cancellationReason: null,
+  employee: { id: 'emp-1', firstName: 'Carlos', lastName: 'López', color: '#3b82f6' },
+  customer: { id: 'cust-1', firstName: 'María', lastName: 'Pérez', phone: '600000000' },
+  service: { id: 'svc-1', name: 'Instalación', color: '#10b981' },
+  ...overrides,
+});
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+describe('AppointmentsService', () => {
+  let service: AppointmentsService;
+  let prisma: any;
+  let availability: jest.Mocked<AvailabilityService>;
+
+  const mockPrisma = {
+    appointment: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    service: { findFirst: jest.fn() },
+    employee: { findFirst: jest.fn() },
+    customer: {
+      findFirst: jest.fn(),
+      update: jest.fn(),
+    },
+  };
+
+  const mockAvailability = {
+    isSlotAvailable: jest.fn(),
+    getAvailableSlots: jest.fn(),
+  };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AppointmentsService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AvailabilityService, useValue: mockAvailability },
+      ],
+    }).compile();
+
+    service = module.get<AppointmentsService>(AppointmentsService);
+    prisma = module.get(PrismaService);
+    availability = module.get(AvailabilityService);
+  });
+
+  // ── findAll ─────────────────────────────────────────────────────────────────
+  describe('findAll', () => {
+    it('returns appointments list with pagination', async () => {
+      const appts = [makeAppointment(), makeAppointment({ id: 'appt-2' })];
+      mockPrisma.appointment.findMany.mockResolvedValue(appts);
+
+      const result = await service.findAll(TENANT, {});
+
+      expect(result.data).toHaveLength(2);
+      expect(result.hasMore).toBe(false);
+      expect(result.nextCursor).toBeNull();
+    });
+
+    it('detects hasMore when records exceed limit', async () => {
+      // findAll uses limit+1 to detect next page; default limit = 50
+      const appts = Array.from({ length: 51 }, (_, i) =>
+        makeAppointment({ id: `appt-${i}` }),
+      );
+      mockPrisma.appointment.findMany.mockResolvedValue(appts);
+
+      const result = await service.findAll(TENANT, {});
+
+      expect(result.hasMore).toBe(true);
+      expect(result.data).toHaveLength(50);
+      expect(result.nextCursor).toBe('appt-49');
+    });
+
+    it('applies date range filter when from/to provided', async () => {
+      mockPrisma.appointment.findMany.mockResolvedValue([]);
+
+      await service.findAll(TENANT, { from: '2026-03-01', to: '2026-03-31' });
+
+      expect(mockPrisma.appointment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            startsAt: expect.objectContaining({
+              gte: expect.any(Date),
+              lte: expect.any(Date),
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('applies employeeId filter when provided', async () => {
+      mockPrisma.appointment.findMany.mockResolvedValue([]);
+
+      await service.findAll(TENANT, { employeeId: 'emp-1' });
+
+      expect(mockPrisma.appointment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ employeeId: 'emp-1' }),
+        }),
+      );
+    });
+  });
+
+  // ── findById ────────────────────────────────────────────────────────────────
+  describe('findById', () => {
+    it('returns the appointment when found', async () => {
+      const appt = makeAppointment();
+      mockPrisma.appointment.findFirst.mockResolvedValue(appt);
+
+      const result = await service.findById(TENANT, 'appt-1');
+      expect(result.id).toBe('appt-1');
+    });
+
+    it('throws NotFoundException when appointment does not exist', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(null);
+
+      await expect(service.findById(TENANT, 'nonexistent')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  // ── create ──────────────────────────────────────────────────────────────────
+  describe('create', () => {
+    const dto = {
+      employeeId: 'emp-1',
+      customerId: 'cust-1',
+      serviceId: 'svc-1',
+      startsAt: now.toISOString(),
+      durationMinutes: undefined as any,
+      priceCents: undefined as any,
+    };
+
+    beforeEach(() => {
+      mockPrisma.service.findFirst.mockResolvedValue({
+        id: 'svc-1',
+        durationMinutes: 60,
+        priceCents: 5000,
+      });
+      mockAvailability.isSlotAvailable.mockResolvedValue(true);
+      mockPrisma.employee.findFirst.mockResolvedValue({ id: 'emp-1' });
+      mockPrisma.customer.findFirst.mockResolvedValue({ id: 'cust-1' });
+      mockPrisma.appointment.create.mockResolvedValue(makeAppointment());
+      mockPrisma.customer.update.mockResolvedValue({});
+    });
+
+    it('creates appointment using service duration and price', async () => {
+      const result = await service.create(TENANT, dto);
+
+      expect(result.id).toBe('appt-1');
+      expect(mockPrisma.appointment.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            durationMinutes: 60,
+            priceCents: 5000,
+          }),
+        }),
+      );
+    });
+
+    it('throws BadRequestException when service not found', async () => {
+      mockPrisma.service.findFirst.mockResolvedValue(null);
+
+      await expect(service.create(TENANT, dto)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('throws BadRequestException when no duration and no service', async () => {
+      await expect(
+        service.create(TENANT, { ...dto, serviceId: undefined }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws ConflictException when slot is not available', async () => {
+      mockAvailability.isSlotAvailable.mockResolvedValue(false);
+
+      await expect(service.create(TENANT, dto)).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('throws BadRequestException when employee not found', async () => {
+      mockPrisma.employee.findFirst.mockResolvedValue(null);
+
+      await expect(service.create(TENANT, dto)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('throws BadRequestException when customer not found', async () => {
+      mockPrisma.customer.findFirst.mockResolvedValue(null);
+
+      await expect(service.create(TENANT, dto)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('updates customer stats after creation', async () => {
+      await service.create(TENANT, dto);
+
+      expect(mockPrisma.customer.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'cust-1' },
+          data: expect.objectContaining({
+            totalAppointments: { increment: 1 },
+          }),
+        }),
+      );
+    });
+  });
+
+  // ── updateStatus ────────────────────────────────────────────────────────────
+  describe('updateStatus', () => {
+    it('allows valid status transition (pending → confirmed)', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'pending' }),
+      );
+      mockPrisma.appointment.update.mockResolvedValue(
+        makeAppointment({ status: 'confirmed' }),
+      );
+
+      const result = await service.updateStatus(TENANT, 'appt-1', {
+        status: 'confirmed',
+      });
+      expect(result.status).toBe('confirmed');
+    });
+
+    it('rejects invalid status transition (pending → completed)', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'pending' }),
+      );
+
+      await expect(
+        service.updateStatus(TENANT, 'appt-1', { status: 'completed' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects any transition from completed', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'completed' }),
+      );
+
+      await expect(
+        service.updateStatus(TENANT, 'appt-1', { status: 'cancelled' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('sets cancelledAt and cancellationReason when cancelling', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'pending' }),
+      );
+      mockPrisma.appointment.update.mockResolvedValue({});
+
+      await service.updateStatus(TENANT, 'appt-1', {
+        status: 'cancelled',
+        cancellationReason: 'Cliente no vino',
+      });
+
+      expect(mockPrisma.appointment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            cancelledAt: expect.any(Date),
+            cancellationReason: 'Cliente no vino',
+          }),
+        }),
+      );
+    });
+  });
+
+  // ── update ──────────────────────────────────────────────────────────────────
+  describe('update', () => {
+    it('throws BadRequestException when appointment is cancelled', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'cancelled' }),
+      );
+
+      await expect(
+        service.update(TENANT, 'appt-1', { startsAt: now.toISOString() }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('checks for conflicts when time changes', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(makeAppointment());
+      mockAvailability.isSlotAvailable.mockResolvedValue(true);
+      mockPrisma.appointment.update.mockResolvedValue(makeAppointment());
+
+      await service.update(TENANT, 'appt-1', {
+        startsAt: new Date('2026-03-10T14:00:00.000Z').toISOString(),
+      });
+
+      expect(mockAvailability.isSlotAvailable).toHaveBeenCalled();
+    });
+
+    it('throws ConflictException when new time slot is taken', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(makeAppointment());
+      mockAvailability.isSlotAvailable.mockResolvedValue(false);
+
+      await expect(
+        service.update(TENANT, 'appt-1', {
+          startsAt: new Date('2026-03-10T14:00:00.000Z').toISOString(),
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  // ── getCalendar ─────────────────────────────────────────────────────────────
+  describe('getCalendar', () => {
+    it('excludes cancelled appointments', async () => {
+      mockPrisma.appointment.findMany.mockResolvedValue([]);
+
+      await service.getCalendar(TENANT, '2026-03-01', '2026-03-31');
+
+      expect(mockPrisma.appointment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            status: { notIn: ['cancelled'] },
+          }),
+        }),
+      );
+    });
+
+    it('filters by employeeId when provided', async () => {
+      mockPrisma.appointment.findMany.mockResolvedValue([]);
+
+      await service.getCalendar(TENANT, '2026-03-01', '2026-03-31', 'emp-1');
+
+      expect(mockPrisma.appointment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ employeeId: 'emp-1' }),
+        }),
+      );
+    });
+  });
+});

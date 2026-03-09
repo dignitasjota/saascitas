@@ -50,6 +50,7 @@ enum NotificationStatus {
 }
 
 enum UserRole {
+  superadmin
   owner
   admin
   technician
