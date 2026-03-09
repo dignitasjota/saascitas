@@ -1,0 +1,160 @@
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
+import { hash } from '@node-rs/argon2';
+import { PrismaService } from '../../common/prisma/prisma.service';
+import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
+
+const ARGON2_OPTIONS = { memoryCost: 19456, timeCost: 2, parallelism: 1 };
+
+const USER_SELECT = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  phone: true,
+  role: true,
+  employeeId: true,
+  emailVerifiedAt: true,
+  lastLoginAt: true,
+  createdAt: true,
+  employee: { select: { id: true, firstName: true, lastName: true } },
+};
+
+@Injectable()
+export class UsersService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findAll(tenantId: string) {
+    const users = await this.prisma.user.findMany({
+      where: { tenantId, deletedAt: null },
+      select: USER_SELECT,
+      orderBy: [{ role: 'asc' }, { firstName: 'asc' }],
+    });
+    return users;
+  }
+
+  async findOne(tenantId: string, id: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id, tenantId, deletedAt: null },
+      select: USER_SELECT,
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
+  async create(tenantId: string, dto: CreateUserDto) {
+    // Check unique email within tenant
+    const existing = await this.prisma.user.findFirst({
+      where: { email: dto.email.toLowerCase(), tenantId, deletedAt: null },
+    });
+    if (existing) throw new ConflictException('Email already in use');
+
+    // Cannot create another owner
+    if (dto.role === 'owner') {
+      throw new BadRequestException('Cannot create another owner user');
+    }
+
+    // Validate employeeId belongs to tenant
+    if (dto.employeeId) {
+      const emp = await this.prisma.employee.findFirst({
+        where: { id: dto.employeeId, tenantId, deletedAt: null },
+      });
+      if (!emp) throw new NotFoundException('Employee not found');
+    }
+
+    const passwordHash = await hash(dto.password, ARGON2_OPTIONS);
+
+    const user = await this.prisma.user.create({
+      data: {
+        tenantId,
+        email: dto.email.toLowerCase(),
+        passwordHash,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        phone: dto.phone,
+        role: dto.role,
+        employeeId: dto.employeeId ?? null,
+      },
+      select: USER_SELECT,
+    });
+
+    return user;
+  }
+
+  async update(tenantId: string, id: string, dto: UpdateUserDto, requesterId: string, requesterRole: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id, tenantId, deletedAt: null },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    // Only owner can change roles or edit other users
+    if (id !== requesterId && requesterRole !== 'owner') {
+      throw new ForbiddenException('Only owner can edit other users');
+    }
+
+    // Cannot demote the owner
+    if (user.role === 'owner' && dto.role && dto.role !== 'owner') {
+      throw new ForbiddenException('Cannot change the role of the owner');
+    }
+
+    // Cannot promote to owner
+    if (dto.role === 'owner' && user.role !== 'owner') {
+      throw new BadRequestException('Cannot promote a user to owner');
+    }
+
+    // Validate employeeId
+    if (dto.employeeId) {
+      const emp = await this.prisma.employee.findFirst({
+        where: { id: dto.employeeId, tenantId, deletedAt: null },
+      });
+      if (!emp) throw new NotFoundException('Employee not found');
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        phone: dto.phone,
+        role: dto.role,
+        employeeId: dto.employeeId !== undefined ? dto.employeeId : undefined,
+      },
+      select: USER_SELECT,
+    });
+
+    return updated;
+  }
+
+  async remove(tenantId: string, id: string, requesterId: string, requesterRole: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id, tenantId, deletedAt: null },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    // Cannot delete yourself
+    if (id === requesterId) {
+      throw new ForbiddenException('Cannot delete your own account');
+    }
+
+    // Only owner can delete users
+    if (requesterRole !== 'owner') {
+      throw new ForbiddenException('Only owner can delete users');
+    }
+
+    // Cannot delete the owner
+    if (user.role === 'owner') {
+      throw new ForbiddenException('Cannot delete the owner account');
+    }
+
+    await this.prisma.user.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+  }
+}

@@ -1,0 +1,346 @@
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+  GoneException,
+} from '@nestjs/common';
+import { randomBytes } from 'crypto';
+import { PrismaService } from '../../common/prisma/prisma.service';
+import { AvailabilityService } from '../appointments/availability.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { CreateBookingDto } from './dto/booking.dto';
+
+@Injectable()
+export class BookingService {
+  private readonly logger = new Logger(BookingService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly availabilityService: AvailabilityService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
+
+  /**
+   * Public info about the business (for the booking page header).
+   */
+  async getBusinessInfo(slug: string) {
+    const tenant = await this.prisma.tenant.findFirst({
+      where: { slug, deletedAt: null },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        phone: true,
+        city: true,
+        logoUrl: true,
+        timezone: true,
+        bookingSettings: true,
+        planStatus: true,
+        trialEndsAt: true,
+      },
+    });
+
+    if (!tenant) throw new NotFoundException('Business not found');
+
+    // Tenant must be active or trialing
+    if (!['active', 'trialing'].includes(tenant.planStatus)) {
+      throw new GoneException('Online booking is not available for this business');
+    }
+
+    return tenant;
+  }
+
+  /**
+   * Public services list for the booking page.
+   */
+  async getPublicServices(slug: string) {
+    const tenant = await this.getBusinessInfo(slug);
+
+    return this.prisma.service.findMany({
+      where: {
+        tenantId: tenant.id,
+        isPublic: true,
+        isActive: true,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        durationMinutes: true,
+        priceCents: true,
+        color: true,
+      },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    });
+  }
+
+  /**
+   * Public employees list (for employee selection step).
+   */
+  async getPublicEmployees(slug: string, serviceId?: string) {
+    const tenant = await this.getBusinessInfo(slug);
+
+    const where: any = {
+      tenantId: tenant.id,
+      isActive: true,
+      deletedAt: null,
+    };
+
+    // If a serviceId is given, filter only employees that offer that service
+    if (serviceId) {
+      where.employeeServices = { some: { serviceId } };
+    }
+
+    return this.prisma.employee.findMany({
+      where,
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        color: true,
+        specialties: true,
+      },
+      orderBy: { firstName: 'asc' },
+    });
+  }
+
+  /**
+   * Get available slots for a given employee + date + service.
+   */
+  async getAvailableSlots(
+    slug: string,
+    employeeId: string,
+    date: string,
+    serviceId: string,
+  ) {
+    const tenant = await this.getBusinessInfo(slug);
+
+    const service = await this.prisma.service.findFirst({
+      where: { id: serviceId, tenantId: tenant.id, isPublic: true, deletedAt: null },
+    });
+
+    if (!service) throw new NotFoundException('Service not found');
+
+    const slots = await this.availabilityService.getAvailableSlots(
+      tenant.id,
+      employeeId,
+      date,
+      service.durationMinutes,
+    );
+
+    // Only return available slots for the public page
+    return slots.filter((s) => s.available).map((s) => s.start);
+  }
+
+  /**
+   * Create a booking from the public page.
+   */
+  async createBooking(slug: string, dto: CreateBookingDto) {
+    const tenant = await this.getBusinessInfo(slug);
+    const settings = tenant.bookingSettings as any;
+
+    // Validate service
+    const service = await this.prisma.service.findFirst({
+      where: {
+        id: dto.serviceId,
+        tenantId: tenant.id,
+        isPublic: true,
+        isActive: true,
+        deletedAt: null,
+      },
+    });
+    if (!service) throw new BadRequestException('Service not found');
+
+    // Validate employee
+    const employee = await this.prisma.employee.findFirst({
+      where: { id: dto.employeeId, tenantId: tenant.id, isActive: true, deletedAt: null },
+    });
+    if (!employee) throw new BadRequestException('Employee not found');
+
+    // Build datetime
+    const startsAt = new Date(`${dto.date}T${dto.slot}:00`);
+
+    // Validate minimum advance time
+    const minAdvanceMs = (settings?.minAdvanceHours ?? 2) * 60 * 60 * 1000;
+    if (startsAt.getTime() - Date.now() < minAdvanceMs) {
+      throw new BadRequestException(
+        `Bookings must be made at least ${settings?.minAdvanceHours ?? 2} hours in advance`,
+      );
+    }
+
+    const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60 * 1000);
+
+    // Check availability
+    const available = await this.availabilityService.isSlotAvailable(
+      tenant.id,
+      dto.employeeId,
+      startsAt,
+      endsAt,
+    );
+    if (!available) {
+      throw new ConflictException(
+        'This time slot is no longer available. Please choose another.',
+      );
+    }
+
+    // Find or create customer by phone within this tenant
+    let customer = await this.prisma.customer.findFirst({
+      where: { tenantId: tenant.id, phone: dto.phone, deletedAt: null },
+    });
+
+    if (!customer) {
+      customer = await this.prisma.customer.create({
+        data: {
+          tenantId: tenant.id,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          phone: dto.phone,
+          email: dto.email,
+        },
+      });
+    }
+
+    // Create appointment in a transaction
+    const result = await this.prisma.$transaction(async (tx) => {
+      const appointment = await tx.appointment.create({
+        data: {
+          tenantId: tenant.id,
+          employeeId: dto.employeeId,
+          customerId: customer!.id,
+          serviceId: dto.serviceId,
+          startsAt,
+          endsAt,
+          durationMinutes: service.durationMinutes,
+          priceCents: service.priceCents,
+          customerNotes: dto.notes,
+          source: 'booking_page',
+          status: settings?.autoConfirm ? 'confirmed' : 'pending',
+        },
+      });
+
+      // Create confirmation token (valid 48h)
+      const confirmToken = randomBytes(32).toString('hex');
+      const cancelToken = randomBytes(32).toString('hex');
+
+      await tx.bookingToken.create({
+        data: {
+          tenantId: tenant.id,
+          appointmentId: appointment.id,
+          token: confirmToken,
+          action: 'confirm',
+          expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
+        },
+      });
+
+      await tx.bookingToken.create({
+        data: {
+          tenantId: tenant.id,
+          appointmentId: appointment.id,
+          token: cancelToken,
+          action: 'cancel',
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+      });
+
+      // Update customer stats
+      await tx.customer.update({
+        where: { id: customer!.id },
+        data: {
+          totalAppointments: { increment: 1 },
+          lastAppointmentAt: startsAt,
+        },
+      });
+
+      return { appointment, confirmToken, cancelToken };
+    });
+
+    // Queue notifications (fire-and-forget — don't block the response)
+    void this.notificationsService
+      .queueBookingConfirmation(result.appointment.id)
+      .catch((err) => this.logger.error('Failed to queue confirmation email', err));
+
+    void this.notificationsService
+      .queueBookingReminder(result.appointment.id, startsAt)
+      .catch((err) => this.logger.error('Failed to queue reminder email', err));
+
+    return {
+      appointmentId: result.appointment.id,
+      status: result.appointment.status,
+      startsAt: result.appointment.startsAt,
+      endsAt: result.appointment.endsAt,
+      service: { name: service.name, durationMinutes: service.durationMinutes, priceCents: service.priceCents },
+      employee: { firstName: employee.firstName, lastName: employee.lastName },
+      customer: { firstName: customer.firstName, lastName: customer.lastName, phone: customer.phone },
+      cancelToken: result.cancelToken,
+    };
+  }
+
+  /**
+   * Confirm a booking via token link (from email).
+   */
+  async confirmBooking(token: string) {
+    const record = await this.prisma.bookingToken.findFirst({
+      where: { token, action: 'confirm', usedAt: null },
+      include: { appointment: true },
+    });
+
+    if (!record) throw new NotFoundException('Invalid or expired confirmation link');
+    if (record.expiresAt < new Date()) throw new GoneException('This confirmation link has expired');
+
+    await this.prisma.$transaction([
+      this.prisma.bookingToken.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      }),
+      this.prisma.appointment.update({
+        where: { id: record.appointmentId },
+        data: { status: 'confirmed', confirmationSentAt: new Date() },
+      }),
+    ]);
+
+    return { message: 'Appointment confirmed successfully' };
+  }
+
+  /**
+   * Cancel a booking via token link (from email).
+   */
+  async cancelBooking(token: string, reason?: string) {
+    const record = await this.prisma.bookingToken.findFirst({
+      where: { token, action: 'cancel', usedAt: null },
+      include: { appointment: true },
+    });
+
+    if (!record) throw new NotFoundException('Invalid or expired cancellation link');
+    if (record.expiresAt < new Date()) throw new GoneException('This cancellation link has expired');
+
+    const appt = record.appointment;
+    if (appt.status === 'cancelled' || appt.status === 'completed') {
+      throw new BadRequestException(`Appointment is already ${appt.status}`);
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.bookingToken.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      }),
+      this.prisma.appointment.update({
+        where: { id: record.appointmentId },
+        data: {
+          status: 'cancelled',
+          cancelledAt: new Date(),
+          cancellationReason: reason ?? 'Cancelled by customer',
+        },
+      }),
+    ]);
+
+    // Remove queued reminder if not yet sent
+    void this.notificationsService
+      .cancelReminder(record.appointmentId)
+      .catch(() => null);
+
+    return { message: 'Appointment cancelled successfully' };
+  }
+}

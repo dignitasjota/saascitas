@@ -1,0 +1,187 @@
+'use client'
+
+import { useState } from 'react'
+import { Plus, Search, Phone, Mail, CalendarDays } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
+import { useCustomers, useCreateCustomer } from '@/hooks/use-customers'
+import { formatDate, formatPrice } from '@/lib/utils'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+
+const schema = z.object({
+  firstName: z.string().min(1, 'Nombre requerido'),
+  lastName: z.string().optional(),
+  phone: z.string().min(9, 'Teléfono requerido'),
+  email: z.string().email('Email no válido').optional().or(z.literal('')),
+  address: z.string().optional(),
+  city: z.string().optional(),
+  notes: z.string().optional(),
+})
+type FormData = z.infer<typeof schema>
+
+export default function CustomersPage() {
+  const [search, setSearch] = useState('')
+  const [showNew, setShowNew] = useState(false)
+  const { data, isLoading } = useCustomers(search || undefined)
+  const customers = data?.data ?? []
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Clientes</h1>
+        <Button onClick={() => setShowNew(true)}>
+          <Plus className="h-4 w-4 mr-2" /> Nuevo cliente
+        </Button>
+      </div>
+
+      {/* Search */}
+      <div className="relative max-w-sm">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          className="pl-9"
+          placeholder="Buscar por nombre, email o teléfono..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+      </div>
+
+      {/* Table */}
+      <div className="rounded-lg border overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50">
+            <tr>
+              <th className="text-left px-4 py-3 font-medium">Nombre</th>
+              <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Contacto</th>
+              <th className="text-left px-4 py-3 font-medium hidden lg:table-cell">Ciudad</th>
+              <th className="text-right px-4 py-3 font-medium hidden lg:table-cell">Citas</th>
+              <th className="text-right px-4 py-3 font-medium hidden lg:table-cell">Total</th>
+              <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Última cita</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {isLoading && Array.from({ length: 6 }).map((_, i) => (
+              <tr key={i}>
+                <td colSpan={6} className="px-4 py-3">
+                  <Skeleton className="h-5 w-full" />
+                </td>
+              </tr>
+            ))}
+
+            {!isLoading && customers.length === 0 && (
+              <tr>
+                <td colSpan={6} className="text-center text-muted-foreground py-12">
+                  {search ? 'Sin resultados' : 'No hay clientes todavía'}
+                </td>
+              </tr>
+            )}
+
+            {customers.map(c => (
+              <tr key={c.id} className="hover:bg-muted/30 transition-colors">
+                <td className="px-4 py-3 font-medium">
+                  {c.firstName} {c.lastName}
+                </td>
+                <td className="px-4 py-3 hidden md:table-cell">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Phone className="h-3 w-3" /> {c.phone}
+                    </span>
+                    {c.email && (
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Mail className="h-3 w-3" /> {c.email}
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">
+                  {c.city ?? '-'}
+                </td>
+                <td className="px-4 py-3 hidden lg:table-cell text-right">
+                  {c.totalAppointments}
+                </td>
+                <td className="px-4 py-3 hidden lg:table-cell text-right font-medium">
+                  {formatPrice(c.totalSpentCents)}
+                </td>
+                <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">
+                  {c.lastAppointmentAt ? formatDate(c.lastAppointmentAt) : '-'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <NewCustomerDialog open={showNew} onClose={() => setShowNew(false)} />
+    </div>
+  )
+}
+
+function NewCustomerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const create = useCreateCustomer()
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<FormData>({
+    resolver: zodResolver(schema),
+  })
+
+  const onSubmit = async (data: FormData) => {
+    await create.mutateAsync({ ...data, email: data.email || undefined })
+    reset()
+    onClose()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle>Nuevo cliente</DialogTitle></DialogHeader>
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Nombre *</Label>
+              <Input {...register('firstName')} />
+              {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Apellido</Label>
+              <Input {...register('lastName')} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Teléfono *</Label>
+            <Input type="tel" {...register('phone')} />
+            {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
+          </div>
+          <div className="space-y-1.5">
+            <Label>Email</Label>
+            <Input type="email" {...register('email')} />
+            {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Dirección</Label>
+              <Input {...register('address')} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Ciudad</Label>
+              <Input {...register('city')} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Notas internas</Label>
+            <Input {...register('notes')} />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
+            <Button type="submit" disabled={create.isPending}>
+              {create.isPending ? 'Guardando...' : 'Crear cliente'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
