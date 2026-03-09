@@ -26,7 +26,7 @@ export class BillingService {
     private readonly prisma: PrismaService,
   ) {
     const secretKey = this.config.get<string>('STRIPE_SECRET_KEY', '');
-    this.stripe = new Stripe(secretKey, { apiVersion: '2025-02-24.acacia' });
+    this.stripe = new Stripe(secretKey, { apiVersion: '2026-02-25.clover' });
   }
 
   /**
