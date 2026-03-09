@@ -1,16 +1,26 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { hash, verify } from '@node-rs/argon2';
 import { randomBytes, createHash } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
+import Redis from 'ioredis';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { MailerService } from '../notifications/mailer.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { generateUniqueSlug } from '../../common/utils/slug';
+
+const RESET_TOKEN_TTL = 60 * 60; // 1 hour in seconds
+const RESET_KEY_PREFIX = 'pwd_reset:';
 
 const ARGON2_OPTIONS = {
   memoryCost: 19456,
@@ -23,10 +33,20 @@ const LOCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+  private readonly redis: Redis;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
-  ) {}
+    private readonly config: ConfigService,
+    private readonly mailer: MailerService,
+  ) {
+    this.redis = new Redis({
+      host: this.config.get('REDIS_HOST', 'localhost'),
+      port: this.config.get<number>('REDIS_PORT', 6379),
+    });
+  }
 
   /**
    * Register a new tenant + owner user.
@@ -244,6 +264,78 @@ export class AuthService {
 
     await this.prisma.refreshToken.updateMany({
       where: { tokenHash, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  /**
+   * Request a password reset email.
+   * Always returns 200 to avoid user enumeration.
+   */
+  async forgotPassword(dto: ForgotPasswordDto) {
+    const user = await this.prisma.user.findFirst({
+      where: { email: dto.email.toLowerCase(), deletedAt: null },
+      include: { tenant: true },
+    });
+
+    // Silently succeed even if user not found (no enumeration)
+    if (!user) return;
+
+    // Generate a random token, store hash in Redis
+    const rawToken = randomBytes(32).toString('hex');
+    const tokenHash = this.hashToken(rawToken);
+    const redisKey = `${RESET_KEY_PREFIX}${tokenHash}`;
+
+    await this.redis.set(redisKey, user.id, 'EX', RESET_TOKEN_TTL);
+
+    const frontendUrl = this.config.get('FRONTEND_URL', 'http://localhost:3000');
+    const resetUrl = `${frontendUrl}/reset-password?token=${rawToken}`;
+
+    try {
+      await this.mailer.sendMail({
+        to: user.email,
+        subject: 'Restablecer contraseña — SaaS Citas',
+        template: 'password-reset',
+        context: {
+          name: `${user.firstName} ${user.lastName}`,
+          businessName: user.tenant.name,
+          resetUrl,
+        },
+      });
+    } catch (err) {
+      this.logger.error(`Failed to send reset email to ${user.email}: ${err}`);
+    }
+  }
+
+  /**
+   * Reset password using a valid token.
+   */
+  async resetPassword(dto: ResetPasswordDto) {
+    const tokenHash = this.hashToken(dto.token);
+    const redisKey = `${RESET_KEY_PREFIX}${tokenHash}`;
+
+    const userId = await this.redis.get(redisKey);
+    if (!userId) {
+      throw new BadRequestException('El enlace no es válido o ha expirado');
+    }
+
+    const passwordHash = await hash(dto.newPassword, ARGON2_OPTIONS);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+
+    // Invalidate token after use
+    await this.redis.del(redisKey);
+
+    // Revoke all refresh tokens for this user (force re-login everywhere)
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
   }
