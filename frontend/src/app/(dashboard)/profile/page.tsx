@@ -116,7 +116,7 @@ function ProfileSection({ profile }: { profile: ProfileData }) {
           <div className="flex items-center gap-2 mt-1">
             <p className="text-sm text-muted-foreground">{profile.email}</p>
             {profile.emailVerifiedAt && (
-              <CheckCircle2 className="h-3.5 w-3.5 text-green-500" title="Email verificado" />
+              <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
             )}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
