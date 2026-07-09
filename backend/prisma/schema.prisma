@@ -499,3 +499,18 @@ model AuditLog {
   @@index([tenantId, createdAt(sort: Desc)])
   @@map("audit_logs")
 }
+
+// ============================================
+// STRIPE EVENTS (webhook idempotency)
+// ============================================
+
+// Records processed Stripe webhook event ids so at-least-once redeliveries are
+// not applied twice. Platform-global (no tenantId), so it is intentionally NOT
+// tenant-scoped by the Prisma tenant-guard extension.
+model StripeEvent {
+  id          String   @id @db.VarChar(255) // Stripe event.id (evt_...)
+  type        String   @db.VarChar(100)
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz
+
+  @@map("stripe_events")
+}

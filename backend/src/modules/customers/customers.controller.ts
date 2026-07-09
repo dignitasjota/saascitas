@@ -13,7 +13,11 @@ import { Response } from 'express';
 import { CustomersService } from './customers.service';
 import { CreateCustomerDto, UpdateCustomerDto } from './dto/create-customer.dto';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
+// All staff roles may read and manage customers; bulk export and deletion are
+// restricted to owners/admins (see per-method overrides below).
+@Roles('owner', 'admin', 'technician')
 @Controller('customers')
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
@@ -28,6 +32,7 @@ export class CustomersController {
     return this.customersService.findAll(user.tid, search, limit, cursor);
   }
 
+  @Roles('owner', 'admin')
   @Get('export')
   async exportCsv(
     @CurrentUser() user: JwtPayload,
@@ -68,6 +73,7 @@ export class CustomersController {
     return { data: customer };
   }
 
+  @Roles('owner', 'admin')
   @Delete(':id')
   async remove(
     @CurrentUser() user: JwtPayload,

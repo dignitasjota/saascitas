@@ -27,3 +27,10 @@ export function isOverlapConstraintViolation(err: unknown): boolean {
     haystack.includes('exclusion constraint')
   );
 }
+
+/** Prisma unique-constraint violation (P2002). */
+export function isUniqueViolation(err: unknown): boolean {
+  return (
+    !!err && typeof err === 'object' && (err as { code?: string }).code === 'P2002'
+  );
+}

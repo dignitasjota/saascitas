@@ -12,6 +12,10 @@ const mockPrisma = {
     findFirst: jest.fn(),
     update: jest.fn(),
   },
+  stripeEvent: {
+    create: jest.fn(),
+    delete: jest.fn(),
+  },
 };
 
 const mockConfig = {
@@ -114,6 +118,58 @@ describe('BillingService', () => {
     it('unknown status defaults to active', () => {
       const result = (service as any).mapStripeStatus('some_unknown_status');
       expect(result).toBe('active');
+    });
+  });
+
+  // ─── handleWebhook idempotency ───────────────────────────────────────────────
+
+  describe('handleWebhook (idempotency)', () => {
+    const rawBody = Buffer.from('{}');
+    const sig = 'sig';
+
+    const event = {
+      id: 'evt_123',
+      type: 'invoice.payment_failed',
+      data: { object: { customer: 'cus_1' } },
+    };
+
+    beforeEach(() => {
+      stripe.webhooks.constructEvent.mockReturnValue(event);
+      mockPrisma.tenant.findFirst.mockResolvedValue({ id: TENANT_ID });
+      mockPrisma.tenant.update.mockResolvedValue({});
+    });
+
+    it('processes a new event and records its id', async () => {
+      mockPrisma.stripeEvent.create.mockResolvedValue({ id: event.id });
+
+      const res = await service.handleWebhook(rawBody, sig);
+
+      expect(res).toEqual({ received: true });
+      expect(mockPrisma.stripeEvent.create).toHaveBeenCalledWith({
+        data: { id: 'evt_123', type: 'invoice.payment_failed' },
+      });
+      // handler ran (past_due update)
+      expect(mockPrisma.tenant.update).toHaveBeenCalled();
+    });
+
+    it('skips a duplicate event without reprocessing', async () => {
+      mockPrisma.stripeEvent.create.mockRejectedValue({ code: 'P2002' });
+
+      const res = await service.handleWebhook(rawBody, sig);
+
+      expect(res).toEqual({ received: true });
+      expect(mockPrisma.tenant.update).not.toHaveBeenCalled();
+    });
+
+    it('drops the marker when processing fails so Stripe can retry', async () => {
+      mockPrisma.stripeEvent.create.mockResolvedValue({ id: event.id });
+      mockPrisma.tenant.findFirst.mockRejectedValue(new Error('db down'));
+      mockPrisma.stripeEvent.delete.mockResolvedValue({});
+
+      await expect(service.handleWebhook(rawBody, sig)).rejects.toThrow('db down');
+      expect(mockPrisma.stripeEvent.delete).toHaveBeenCalledWith({
+        where: { id: 'evt_123' },
+      });
     });
   });
 

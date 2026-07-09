@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { isUniqueViolation } from '../../common/utils/prisma-errors';
 
 export type PlanKey = 'basic' | 'professional' | 'business';
 
@@ -171,21 +172,44 @@ export class BillingService {
 
     this.logger.log(`Stripe event: ${event.type}`);
 
-    switch (event.type) {
-      case 'checkout.session.completed':
-        await this.onCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
-        break;
-      case 'customer.subscription.updated':
-        await this.onSubscriptionUpdated(event.data.object as Stripe.Subscription);
-        break;
-      case 'customer.subscription.deleted':
-        await this.onSubscriptionDeleted(event.data.object as Stripe.Subscription);
-        break;
-      case 'invoice.payment_failed':
-        await this.onPaymentFailed(event.data.object as Stripe.Invoice);
-        break;
-      default:
-        this.logger.debug(`Unhandled event: ${event.type}`);
+    // Idempotency: Stripe delivers at-least-once. Claim the event id first; a
+    // duplicate delivery collides on the primary key and is skipped without
+    // reprocessing.
+    try {
+      await this.prisma.stripeEvent.create({
+        data: { id: event.id, type: event.type },
+      });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        this.logger.log(`Duplicate Stripe event ${event.id} ignored`);
+        return { received: true };
+      }
+      throw err;
+    }
+
+    try {
+      switch (event.type) {
+        case 'checkout.session.completed':
+          await this.onCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
+          break;
+        case 'customer.subscription.updated':
+          await this.onSubscriptionUpdated(event.data.object as Stripe.Subscription);
+          break;
+        case 'customer.subscription.deleted':
+          await this.onSubscriptionDeleted(event.data.object as Stripe.Subscription);
+          break;
+        case 'invoice.payment_failed':
+          await this.onPaymentFailed(event.data.object as Stripe.Invoice);
+          break;
+        default:
+          this.logger.debug(`Unhandled event: ${event.type}`);
+      }
+    } catch (err) {
+      // Processing failed: drop the marker so Stripe's redelivery can retry it.
+      await this.prisma.stripeEvent
+        .delete({ where: { id: event.id } })
+        .catch(() => undefined);
+      throw err;
     }
 
     return { received: true };

@@ -17,7 +17,11 @@ import {
   UpdateStatusDto,
 } from './dto/create-appointment.dto';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
+// All staff roles may view and manage appointments; bulk CSV export is
+// restricted to owners/admins (see per-method override below).
+@Roles('owner', 'admin', 'technician')
 @Controller('appointments')
 export class AppointmentsController {
   constructor(
@@ -70,6 +74,7 @@ export class AppointmentsController {
     return { data };
   }
 
+  @Roles('owner', 'admin')
   @Get('export')
   async exportCsv(
     @CurrentUser() user: JwtPayload,
