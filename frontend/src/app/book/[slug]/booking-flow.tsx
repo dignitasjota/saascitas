@@ -38,6 +38,7 @@ interface Business {
   phone?: string
   city?: string
   logoUrl?: string
+  timezone?: string
 }
 
 interface Service {
@@ -475,8 +476,17 @@ function ConfirmationScreen({
   business: Business
   confirmation: any
 }) {
+  // Render in the business's timezone so a client booking from another zone
+  // still sees the local appointment time.
   const displayDate = confirmation.startsAt
-    ? format(new Date(confirmation.startsAt), "EEEE d 'de' MMMM 'a las' HH:mm'h'", { locale: es })
+    ? new Intl.DateTimeFormat('es-ES', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: business.timezone,
+      }).format(new Date(confirmation.startsAt))
     : ''
 
   return (

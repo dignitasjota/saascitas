@@ -13,6 +13,7 @@ interface Tenant {
   id: string;
   name: string;
   slug: string;
+  timezone?: string;
 }
 
 interface AuthState {

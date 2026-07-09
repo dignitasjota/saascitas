@@ -138,6 +138,7 @@ export class AuthService {
         id: result.tenant.id,
         name: result.tenant.name,
         slug: result.tenant.slug,
+        timezone: result.tenant.timezone,
       },
       ...tokens,
     };
@@ -214,6 +215,7 @@ export class AuthService {
         id: user.tenant.id,
         name: user.tenant.name,
         slug: user.tenant.slug,
+        timezone: user.tenant.timezone,
       },
       ...tokens,
     };
@@ -267,6 +269,7 @@ export class AuthService {
         id: stored.user.tenant.id,
         name: stored.user.tenant.name,
         slug: stored.user.tenant.slug,
+        timezone: stored.user.tenant.timezone,
       },
       ...tokens,
     };

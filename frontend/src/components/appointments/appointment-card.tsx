@@ -1,6 +1,7 @@
 'use client'
 
 import { formatTime, formatPrice } from '@/lib/utils'
+import { useTenantTimezone } from '@/hooks/use-tenant'
 import { StatusBadge } from './status-badge'
 import type { Appointment } from '@/types/api'
 import { MapPin, Phone } from 'lucide-react'
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export function AppointmentCard({ appointment, onClick }: Props) {
+  const tz = useTenantTimezone()
   const { employee, customer, service, startsAt, endsAt, status, address, city, priceCents } = appointment
 
   return (
@@ -21,7 +23,7 @@ export function AppointmentCard({ appointment, onClick }: Props) {
       {/* Time + status */}
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-semibold tabular-nums">
-          {formatTime(startsAt)} – {formatTime(endsAt)}
+          {formatTime(startsAt, tz)} – {formatTime(endsAt, tz)}
         </span>
         <StatusBadge status={status} />
       </div>

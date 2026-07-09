@@ -11,13 +11,15 @@ import { AppointmentCard } from '@/components/appointments/appointment-card'
 import { NewAppointmentDialog } from '@/components/appointments/new-appointment-dialog'
 import { useToday } from '@/hooks/use-appointments'
 import { useAuthStore } from '@/stores/auth-store'
-import { formatDate } from '@/lib/utils'
+import { useTenantTimezone } from '@/hooks/use-tenant'
+import { formatDate, todayInTimezone } from '@/lib/utils'
 import apiClient from '@/lib/api-client'
 
 export default function DashboardPage() {
   const [showNew, setShowNew] = useState(false)
   const { user } = useAuthStore()
-  const today = new Date().toISOString().split('T')[0]
+  const tz = useTenantTimezone()
+  const today = todayInTimezone(tz)
   const { data: appointments = [], isLoading } = useToday()
 
   // Show onboarding banner if no services yet
@@ -61,7 +63,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-bold">Hola, {user?.firstName} 👋</h1>
           <p className="text-muted-foreground text-sm mt-0.5">
-            {formatDate(today)} · {appointments.length} cita{appointments.length !== 1 ? 's' : ''} hoy
+            {formatDate(new Date(), tz)} · {appointments.length} cita{appointments.length !== 1 ? 's' : ''} hoy
           </p>
         </div>
         <Button onClick={() => setShowNew(true)}>
