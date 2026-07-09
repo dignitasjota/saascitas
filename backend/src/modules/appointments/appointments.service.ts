@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AvailabilityService } from './availability.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { isOverlapConstraintViolation } from '../../common/utils/prisma-errors';
 import {
   todayInTz,
@@ -29,6 +30,7 @@ export class AppointmentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly availabilityService: AvailabilityService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async findAll(
@@ -223,8 +225,9 @@ export class AppointmentsService {
       }
     }
 
+    let updated;
     try {
-      return await this.prisma.appointment.update({
+      updated = await this.prisma.appointment.update({
         where: { id },
         data: {
           // Always persist the three time fields together so endsAt stays
@@ -250,6 +253,16 @@ export class AppointmentsService {
       }
       throw err;
     }
+
+    // Move the reminder to the new time so it doesn't fire at the old date
+    // (fire-and-forget — never block or fail the update on queue issues).
+    if (timeChanged) {
+      void this.notifications
+        .rescheduleReminder(id, startsAt)
+        .catch(() => undefined);
+    }
+
+    return updated;
   }
 
   async updateStatus(tenantId: string, id: string, dto: UpdateStatusDto) {
@@ -279,10 +292,17 @@ export class AppointmentsService {
       updateData.cancellationReason = dto.cancellationReason;
     }
 
-    return this.prisma.appointment.update({
+    const updated = await this.prisma.appointment.update({
       where: { id },
       data: updateData,
     });
+
+    // Drop the queued reminder for a cancelled appointment (fire-and-forget).
+    if (dto.status === 'cancelled') {
+      void this.notifications.cancelReminder(id).catch(() => undefined);
+    }
+
+    return updated;
   }
 
   async getCalendar(

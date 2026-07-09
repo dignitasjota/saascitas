@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
 import { AvailabilityService } from './availability.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -64,6 +65,13 @@ describe('AppointmentsService', () => {
     getAvailableSlots: jest.fn(),
   };
 
+  const mockNotifications = {
+    rescheduleReminder: jest.fn().mockResolvedValue(undefined),
+    cancelReminder: jest.fn().mockResolvedValue(undefined),
+    queueBookingReminder: jest.fn().mockResolvedValue(undefined),
+    queueBookingConfirmation: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -72,6 +80,7 @@ describe('AppointmentsService', () => {
         AppointmentsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AvailabilityService, useValue: mockAvailability },
+        { provide: NotificationsService, useValue: mockNotifications },
       ],
     }).compile();
 
@@ -314,6 +323,28 @@ describe('AppointmentsService', () => {
         }),
       );
     });
+
+    it('cancels the queued reminder when cancelling', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'pending' }),
+      );
+      mockPrisma.appointment.update.mockResolvedValue({});
+
+      await service.updateStatus(TENANT, 'appt-1', { status: 'cancelled' });
+
+      expect(mockNotifications.cancelReminder).toHaveBeenCalledWith('appt-1');
+    });
+
+    it('does not cancel the reminder for a non-cancel transition', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'pending' }),
+      );
+      mockPrisma.appointment.update.mockResolvedValue({});
+
+      await service.updateStatus(TENANT, 'appt-1', { status: 'confirmed' });
+
+      expect(mockNotifications.cancelReminder).not.toHaveBeenCalled();
+    });
   });
 
   // ── update ──────────────────────────────────────────────────────────────────
@@ -388,6 +419,29 @@ describe('AppointmentsService', () => {
           startsAt: new Date('2026-03-10T14:00:00.000Z').toISOString(),
         }),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('reschedules the reminder to the new time', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(makeAppointment());
+      mockAvailability.isSlotAvailable.mockResolvedValue(true);
+      mockPrisma.appointment.update.mockResolvedValue(makeAppointment());
+
+      const newStart = new Date('2026-03-10T14:00:00.000Z');
+      await service.update(TENANT, 'appt-1', { startsAt: newStart.toISOString() });
+
+      expect(mockNotifications.rescheduleReminder).toHaveBeenCalledWith(
+        'appt-1',
+        newStart,
+      );
+    });
+
+    it('does not touch the reminder when only non-time fields change', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(makeAppointment());
+      mockPrisma.appointment.update.mockResolvedValue(makeAppointment());
+
+      await service.update(TENANT, 'appt-1', { notes: 'nueva nota' });
+
+      expect(mockNotifications.rescheduleReminder).not.toHaveBeenCalled();
     });
   });
 

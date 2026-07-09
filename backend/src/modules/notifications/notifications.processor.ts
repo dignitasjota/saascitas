@@ -103,6 +103,14 @@ export class NotificationsProcessor extends WorkerHost {
       return;
     }
 
+    // Don't send a "your appointment is tomorrow" reminder for an appointment
+    // that has already passed (e.g. it was moved earlier after the job was
+    // queued for the original time).
+    if (appt.startsAt.getTime() < Date.now()) {
+      this.logger.debug(`Appointment ${appointmentId} already passed, skipping reminder`);
+      return;
+    }
+
     const email = appt.customer.email;
     if (!email) {
       this.logger.debug(`Appointment ${appointmentId}: no customer email, skipping reminder`);

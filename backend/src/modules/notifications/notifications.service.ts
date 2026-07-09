@@ -78,4 +78,14 @@ export class NotificationsService {
       this.logger.debug(`Cancelled reminder job for appointment ${appointmentId}`);
     }
   }
+
+  /**
+   * Reschedule the reminder after an appointment is moved. The delayed job is
+   * keyed by appointmentId, so we must remove the stale one before queueing a
+   * new one at the new time.
+   */
+  async rescheduleReminder(appointmentId: string, newStartsAt: Date) {
+    await this.cancelReminder(appointmentId);
+    await this.queueBookingReminder(appointmentId, newStartsAt);
+  }
 }
