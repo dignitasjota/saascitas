@@ -8,6 +8,13 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { AvailabilityService } from './availability.service';
 import { isOverlapConstraintViolation } from '../../common/utils/prisma-errors';
 import {
+  todayInTz,
+  startOfDayUtc,
+  endOfDayUtc,
+  formatDateInTz,
+  formatTimeInTz,
+} from '../../common/utils/timezone';
+import {
   CreateAppointmentDto,
   UpdateAppointmentDto,
   UpdateStatusDto,
@@ -15,6 +22,7 @@ import {
 
 const SLOT_TAKEN_MESSAGE =
   'This time slot is not available. The employee already has an appointment.';
+const DEFAULT_TZ = 'Europe/Madrid';
 
 @Injectable()
 export class AppointmentsService {
@@ -304,16 +312,24 @@ export class AppointmentsService {
   }
 
   async getToday(tenantId: string, employeeId?: string) {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+    // "Today" is the tenant's civil day, not the server's.
+    const tz = await this.getTenantTz(tenantId);
+    const today = todayInTz(tz);
 
     return this.getCalendar(
       tenantId,
-      todayStart.toISOString(),
-      todayEnd.toISOString(),
+      startOfDayUtc(today, tz).toISOString(),
+      endOfDayUtc(today, tz).toISOString(),
       employeeId,
     );
+  }
+
+  private async getTenantTz(tenantId: string): Promise<string> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { timezone: true },
+    });
+    return tenant?.timezone ?? DEFAULT_TZ;
   }
 
   async exportCsv(
@@ -321,6 +337,8 @@ export class AppointmentsService {
     from?: string,
     to?: string,
   ): Promise<string> {
+    const tz = await this.getTenantTz(tenantId);
+
     const where: any = { tenantId };
     if (from || to) {
       where.startsAt = {};
@@ -350,9 +368,9 @@ export class AppointmentsService {
 
     const lines = rows.map((a) => [
       escape(a.id),
-      escape(a.startsAt.toISOString().split('T')[0]),
-      escape(a.startsAt.toTimeString().slice(0, 5)),
-      escape(a.endsAt.toTimeString().slice(0, 5)),
+      escape(formatDateInTz(a.startsAt, tz)),
+      escape(formatTimeInTz(a.startsAt, tz)),
+      escape(formatTimeInTz(a.endsAt, tz)),
       escape(`${a.customer.firstName} ${a.customer.lastName}`),
       escape(a.customer.email),
       escape(a.customer.phone),

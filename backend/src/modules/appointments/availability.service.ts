@@ -1,6 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { DayOfWeek } from '@prisma/client';
+import {
+  zonedWallTimeToUtc,
+  civilDayOfWeek,
+  startOfDayUtc,
+  endOfDayUtc,
+} from '../../common/utils/timezone';
+
+const DEFAULT_TZ = 'Europe/Madrid';
 
 export interface TimeSlot {
   start: string; // "09:00"
@@ -31,15 +39,22 @@ export class AvailabilityService {
     date: string,
     durationMinutes: number,
   ): Promise<TimeSlot[]> {
-    const targetDate = new Date(date);
-    const dayOfWeek = DAY_MAP[targetDate.getDay()];
+    // Business timezone: slots and day-of-week are wall-clock in the tenant's
+    // zone, not the server's. `date` is a civil date (YYYY-MM-DD).
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { timezone: true },
+    });
+    const tz = tenant?.timezone ?? DEFAULT_TZ;
+
+    const dayOfWeek = DAY_MAP[civilDayOfWeek(date)];
 
     // 1. Check for schedule exceptions on this date
     const exception = await this.prisma.scheduleException.findFirst({
       where: {
         employeeId,
         tenantId,
-        date: targetDate,
+        date: new Date(`${date}T00:00:00.000Z`), // @db.Date is stored at UTC midnight
       },
     });
 
@@ -71,16 +86,15 @@ export class AvailabilityService {
       workingPeriods = hours.map((h) => ({ start: h.startTime, end: h.endTime }));
     }
 
-    // 3. Get existing appointments for this date
-    const dayStart = new Date(date + 'T00:00:00');
-    const dayEnd = new Date(date + 'T23:59:59');
+    // 3. Get existing appointments that START on this civil day (tenant tz)
+    const dayStart = startOfDayUtc(date, tz);
+    const dayEnd = endOfDayUtc(date, tz);
 
     const existingAppointments = await this.prisma.appointment.findMany({
       where: {
         employeeId,
         tenantId,
-        startsAt: { gte: dayStart },
-        endsAt: { lte: dayEnd },
+        startsAt: { gte: dayStart, lt: dayEnd },
         status: { notIn: ['cancelled', 'no_show'] },
       },
       select: { startsAt: true, endsAt: true },
@@ -98,8 +112,8 @@ export class AvailabilityService {
       );
 
       for (const slot of periodSlots) {
-        const slotStart = new Date(`${date}T${slot.start}:00`);
-        const slotEnd = new Date(`${date}T${slot.end}:00`);
+        const slotStart = zonedWallTimeToUtc(date, slot.start, tz);
+        const slotEnd = zonedWallTimeToUtc(date, slot.end, tz);
 
         const hasConflict = existingAppointments.some((appt) => {
           return slotStart < appt.endsAt && slotEnd > appt.startsAt;

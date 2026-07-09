@@ -4,13 +4,16 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Tenant tz is mocked to UTC below, so wall-clock times map 1:1 to UTC instants
+// and the test is deterministic regardless of the CI server timezone.
 function makeDate(dateStr: string, timeStr: string): Date {
-  return new Date(`${dateStr}T${timeStr}:00`);
+  return new Date(`${dateStr}T${timeStr}:00Z`);
 }
 
 // ─── Mock Prisma ──────────────────────────────────────────────────────────────
 
 const mockPrisma = {
+  tenant: { findUnique: jest.fn() },
   scheduleException: { findFirst: jest.fn() },
   workingHour: { findMany: jest.fn() },
   appointment: { findFirst: jest.fn(), findMany: jest.fn() },
@@ -35,7 +38,8 @@ describe('AvailabilityService', () => {
 
     service = module.get<AvailabilityService>(AvailabilityService);
 
-    // Default: no exceptions, no appointments
+    // Default: tenant in UTC, no exceptions, no appointments
+    mockPrisma.tenant.findUnique.mockResolvedValue({ timezone: 'UTC' });
     mockPrisma.scheduleException.findFirst.mockResolvedValue(null);
     mockPrisma.appointment.findMany.mockResolvedValue([]);
     mockPrisma.appointment.findFirst.mockResolvedValue(null);
@@ -167,6 +171,34 @@ describe('AvailabilityService', () => {
       expect(slots.find((s) => s.start === '10:00')?.available).toBe(true);
       expect(slots.find((s) => s.start === '11:00')?.available).toBe(false);
       expect(slots.find((s) => s.start === '12:00')?.available).toBe(true);
+    });
+  });
+
+  // ─── Timezone-aware conflict detection ─────────────────────────────────────
+
+  describe('tenant timezone', () => {
+    it('resolves conflicts against slots in the tenant timezone (Madrid summer)', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({ timezone: 'Europe/Madrid' });
+      mockPrisma.workingHour.findMany.mockResolvedValue([
+        { startTime: '09:00', endTime: '13:00' },
+      ]);
+      // Stored in UTC: 08:00–09:00Z == 10:00–11:00 in Madrid (CEST, UTC+2)
+      mockPrisma.appointment.findMany.mockResolvedValue([
+        {
+          startsAt: new Date('2026-07-06T08:00:00Z'),
+          endsAt: new Date('2026-07-06T09:00:00Z'),
+        },
+      ]);
+
+      const slots = await service.getAvailableSlots(
+        TENANT_ID,
+        EMPLOYEE_ID,
+        '2026-07-06',
+        60,
+      );
+
+      expect(slots.find((s) => s.start === '10:00')?.available).toBe(false);
+      expect(slots.find((s) => s.start === '09:00')?.available).toBe(true);
     });
   });
 

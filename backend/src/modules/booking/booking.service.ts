@@ -11,6 +11,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { AvailabilityService } from '../appointments/availability.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { isOverlapConstraintViolation } from '../../common/utils/prisma-errors';
+import { zonedWallTimeToUtc } from '../../common/utils/timezone';
 import { CreateBookingDto } from './dto/booking.dto';
 
 @Injectable()
@@ -161,8 +162,9 @@ export class BookingService {
     });
     if (!employee) throw new BadRequestException('Employee not found');
 
-    // Build datetime
-    const startsAt = new Date(`${dto.date}T${dto.slot}:00`);
+    // Build datetime: dto.slot ("HH:MM") is wall-clock time in the tenant's
+    // timezone, converted here to the UTC instant we store.
+    const startsAt = zonedWallTimeToUtc(dto.date, dto.slot, tenant.timezone);
 
     // Validate minimum advance time
     const minAdvanceMs = (settings?.minAdvanceHours ?? 2) * 60 * 60 * 1000;
