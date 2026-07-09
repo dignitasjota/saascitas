@@ -23,7 +23,7 @@ import { getInitials } from '@/lib/utils'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 
 const navItems = [
-  { href: '/', label: 'Agenda', icon: CalendarDays, exact: true },
+  { href: '/dashboard', label: 'Agenda', icon: CalendarDays, exact: true },
   { href: '/appointments', label: 'Citas', icon: CalendarDays },
   { href: '/customers', label: 'Clientes', icon: Users },
   { href: '/employees', label: 'Empleados', icon: UserCog },

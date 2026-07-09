@@ -14,7 +14,7 @@ datasource db {
 enum SubscriptionPlan {
   basic
   professional
-  premium
+  business
 }
 
 enum SubscriptionStatus {

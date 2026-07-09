@@ -398,7 +398,7 @@ function StepDone({ slug }: { slug: string }) {
         >
           Copiar enlace
         </Button>
-        <Button onClick={() => router.push('/')}>
+        <Button onClick={() => router.push('/dashboard')}>
           Ir al panel de control →
         </Button>
       </div>

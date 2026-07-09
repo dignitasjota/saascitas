@@ -101,7 +101,7 @@ describe('BillingService', () => {
       ['unpaid', 'past_due'],
       ['canceled', 'cancelled'],
       ['trialing', 'trialing'],
-      ['paused', 'suspended'],
+      ['paused', 'paused'],
       ['incomplete', 'trialing'],
       ['incomplete_expired', 'cancelled'],
     ];

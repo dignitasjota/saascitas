@@ -52,7 +52,7 @@ export function useLogin() {
     },
     onSuccess: (data) => {
       setAuth(data.user, data.tenant, data.accessToken, data.refreshToken)
-      router.push(data.user.role === 'superadmin' ? '/admin' : '/')
+      router.push(data.user.role === 'superadmin' ? '/admin' : '/dashboard')
     },
     onError: (error: any) => {
       const msg = error?.response?.data?.detail || 'Credenciales incorrectas'

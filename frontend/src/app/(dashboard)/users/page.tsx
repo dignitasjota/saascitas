@@ -353,7 +353,9 @@ function UserRow({
         <div className="flex items-center gap-3 mt-0.5">
           <p className="text-xs text-muted-foreground truncate">{user.email}</p>
           {user.emailVerifiedAt && (
-            <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" title="Email verificado" />
+            <span title="Email verificado" className="inline-flex shrink-0">
+              <CheckCircle2 className="h-3 w-3 text-green-500" aria-label="Email verificado" />
+            </span>
           )}
         </div>
       </div>
