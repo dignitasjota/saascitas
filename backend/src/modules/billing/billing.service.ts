@@ -246,7 +246,13 @@ export class BillingService {
     if (!tenantId) return;
 
     const status = this.mapStripeStatus(subscription.status);
-    const plan = (subscription.metadata?.plan ?? 'basic') as PlanKey;
+    // Derive the plan from the CURRENT price on the subscription, not the
+    // checkout metadata (which is frozen and won't reflect a plan change made
+    // from the Billing Portal). Fall back to metadata only if the price is
+    // unknown.
+    const plan =
+      this.planFromSubscription(subscription) ??
+      ((subscription.metadata?.plan as PlanKey) ?? 'basic');
 
     await this.prisma.tenant.update({
       where: { id: tenantId },
@@ -293,6 +299,22 @@ export class BillingService {
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
+
+  /** Map the subscription's current price id back to a plan key. */
+  private planFromSubscription(
+    subscription: Stripe.Subscription,
+  ): PlanKey | null {
+    const priceId = subscription.items?.data?.[0]?.price?.id;
+    if (!priceId) return null;
+
+    const plans: PlanKey[] = ['basic', 'professional', 'business'];
+    for (const plan of plans) {
+      if (this.config.get<string>(PLAN_PRICE_ENV[plan]) === priceId) {
+        return plan;
+      }
+    }
+    return null;
+  }
 
   private getPlanLimits(plan: PlanKey): { maxEmployees: number } {
     const limits: Record<PlanKey, { maxEmployees: number }> = {

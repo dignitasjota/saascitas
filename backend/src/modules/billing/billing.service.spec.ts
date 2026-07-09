@@ -173,6 +173,44 @@ describe('BillingService', () => {
     });
   });
 
+  // ─── onSubscriptionUpdated (plan from current price) ─────────────────────────
+
+  describe('onSubscriptionUpdated', () => {
+    beforeEach(() => mockPrisma.tenant.update.mockResolvedValue({}));
+
+    it('derives the plan from the current price, ignoring stale metadata', async () => {
+      const subscription = {
+        metadata: { tenantId: TENANT_ID, plan: 'basic' }, // stale (from checkout)
+        status: 'active',
+        items: { data: [{ price: { id: 'price_professional' } }] },
+      };
+
+      await (service as any).onSubscriptionUpdated(subscription);
+
+      expect(mockPrisma.tenant.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ plan: 'professional', maxEmployees: 5 }),
+        }),
+      );
+    });
+
+    it('falls back to metadata when the price is unknown', async () => {
+      const subscription = {
+        metadata: { tenantId: TENANT_ID, plan: 'business' },
+        status: 'active',
+        items: { data: [{ price: { id: 'price_unknown' } }] },
+      };
+
+      await (service as any).onSubscriptionUpdated(subscription);
+
+      expect(mockPrisma.tenant.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ plan: 'business', maxEmployees: 20 }),
+        }),
+      );
+    });
+  });
+
   // ─── getBillingStatus ──────────────────────────────────────────────────────
 
   describe('getBillingStatus', () => {
