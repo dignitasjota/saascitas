@@ -174,6 +174,46 @@ describe('AvailabilityService', () => {
     });
   });
 
+  // ─── Booking settings (grid step + buffer) ─────────────────────────────────
+
+  describe('booking settings', () => {
+    it('advances slot starts by slotDurationMinutes, not service duration', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({
+        timezone: 'UTC',
+        bookingSettings: { slotDurationMinutes: 30 },
+      });
+      mockPrisma.workingHour.findMany.mockResolvedValue([
+        { startTime: '09:00', endTime: '11:00' },
+      ]);
+
+      // 90-min service on a 30-min grid → starts at 09:00, 09:30
+      const slots = await service.getAvailableSlots(TENANT_ID, EMPLOYEE_ID, DATE, 90);
+      const starts = slots.map((s) => s.start);
+      expect(starts).toEqual(['09:00', '09:30']);
+      expect(slots[0].end).toBe('10:30');
+    });
+
+    it('blocks slots within bufferMinutes of an existing appointment', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({
+        timezone: 'UTC',
+        bookingSettings: { bufferMinutes: 30 },
+      });
+      mockPrisma.workingHour.findMany.mockResolvedValue([
+        { startTime: '09:00', endTime: '13:00' },
+      ]);
+      // Existing 10:00–11:00 (UTC); with a 30-min buffer the 09:00 slot
+      // (ends 10:00) and the 11:00 slot (starts 11:00) are too close.
+      mockPrisma.appointment.findMany.mockResolvedValue([
+        { startsAt: makeDate(DATE, '10:00'), endsAt: makeDate(DATE, '11:00') },
+      ]);
+
+      const slots = await service.getAvailableSlots(TENANT_ID, EMPLOYEE_ID, DATE, 60);
+      expect(slots.find((s) => s.start === '09:00')?.available).toBe(false);
+      expect(slots.find((s) => s.start === '11:00')?.available).toBe(false);
+      expect(slots.find((s) => s.start === '12:00')?.available).toBe(true);
+    });
+  });
+
   // ─── Timezone-aware conflict detection ─────────────────────────────────────
 
   describe('tenant timezone', () => {

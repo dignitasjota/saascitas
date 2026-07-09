@@ -119,6 +119,7 @@ export class BookingService {
     serviceId: string,
   ) {
     const tenant = await this.getBusinessInfo(slug);
+    const settings = tenant.bookingSettings as any;
 
     const service = await this.prisma.service.findFirst({
       where: { id: serviceId, tenantId: tenant.id, isPublic: true, deletedAt: null },
@@ -133,8 +134,19 @@ export class BookingService {
       service.durationMinutes,
     );
 
-    // Only return available slots for the public page
-    return slots.filter((s) => s.available).map((s) => s.start);
+    // Only offer slots the client can actually book: available, and within the
+    // min/max advance window (so the last booking step doesn't reject them).
+    const now = Date.now();
+    const minAdvanceMs = (settings?.minAdvanceHours ?? 2) * 60 * 60 * 1000;
+    const maxAdvanceMs = (settings?.maxAdvanceDays ?? 30) * 24 * 60 * 60 * 1000;
+
+    return slots
+      .filter((s) => s.available)
+      .filter((s) => {
+        const at = zonedWallTimeToUtc(date, s.start, tenant.timezone).getTime();
+        return at - now >= minAdvanceMs && at - now <= maxAdvanceMs;
+      })
+      .map((s) => s.start);
   }
 
   /**
@@ -162,9 +174,24 @@ export class BookingService {
     });
     if (!employee) throw new BadRequestException('Employee not found');
 
+    // Validate the employee actually offers this service
+    const offersService = await this.prisma.employeeService.findFirst({
+      where: {
+        tenantId: tenant.id,
+        employeeId: dto.employeeId,
+        serviceId: dto.serviceId,
+      },
+    });
+    if (!offersService) {
+      throw new BadRequestException(
+        'The selected professional does not offer this service',
+      );
+    }
+
     // Build datetime: dto.slot ("HH:MM") is wall-clock time in the tenant's
     // timezone, converted here to the UTC instant we store.
     const startsAt = zonedWallTimeToUtc(dto.date, dto.slot, tenant.timezone);
+    const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60 * 1000);
 
     // Validate minimum advance time
     const minAdvanceMs = (settings?.minAdvanceHours ?? 2) * 60 * 60 * 1000;
@@ -174,18 +201,28 @@ export class BookingService {
       );
     }
 
-    const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60 * 1000);
+    // Validate maximum advance window
+    const maxAdvanceDays = settings?.maxAdvanceDays ?? 30;
+    const maxAdvanceMs = maxAdvanceDays * 24 * 60 * 60 * 1000;
+    if (startsAt.getTime() - Date.now() > maxAdvanceMs) {
+      throw new BadRequestException(
+        `Bookings cannot be made more than ${maxAdvanceDays} days in advance`,
+      );
+    }
 
-    // Check availability
-    const available = await this.availabilityService.isSlotAvailable(
+    // Validate the slot against real availability (working hours, schedule
+    // exceptions, buffer and existing appointments) — not just raw overlap.
+    // This rejects direct POSTs with off-grid or out-of-hours slots.
+    const daySlots = await this.availabilityService.getAvailableSlots(
       tenant.id,
       dto.employeeId,
-      startsAt,
-      endsAt,
+      dto.date,
+      service.durationMinutes,
     );
-    if (!available) {
+    const slotOk = daySlots.some((s) => s.start === dto.slot && s.available);
+    if (!slotOk) {
       throw new ConflictException(
-        'This time slot is no longer available. Please choose another.',
+        'This time slot is not available. Please choose another.',
       );
     }
 
@@ -306,6 +343,13 @@ export class BookingService {
     if (!record) throw new NotFoundException('Invalid or expired confirmation link');
     if (record.expiresAt < new Date()) throw new GoneException('This confirmation link has expired');
 
+    // Do not resurrect a terminal appointment: a valid confirm token must not
+    // flip a cancelled/completed/no-show booking back to confirmed.
+    const appt = record.appointment;
+    if (['cancelled', 'completed', 'no_show'].includes(appt.status)) {
+      throw new BadRequestException(`Appointment is already ${appt.status}`);
+    }
+
     await this.prisma.$transaction([
       this.prisma.bookingToken.update({
         where: { id: record.id },
@@ -313,7 +357,7 @@ export class BookingService {
       }),
       this.prisma.appointment.update({
         where: { id: record.appointmentId },
-        data: { status: 'confirmed', confirmationSentAt: new Date() },
+        data: { status: 'confirmed' },
       }),
     ]);
 

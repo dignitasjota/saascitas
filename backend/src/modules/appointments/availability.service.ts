@@ -39,13 +39,24 @@ export class AvailabilityService {
     date: string,
     durationMinutes: number,
   ): Promise<TimeSlot[]> {
-    // Business timezone: slots and day-of-week are wall-clock in the tenant's
-    // zone, not the server's. `date` is a civil date (YYYY-MM-DD).
+    // Business timezone + booking settings. Slots and day-of-week are
+    // wall-clock in the tenant's zone, not the server's. `date` is a civil
+    // date (YYYY-MM-DD).
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
-      select: { timezone: true },
+      select: { timezone: true, bookingSettings: true },
     });
     const tz = tenant?.timezone ?? DEFAULT_TZ;
+    const settings = (tenant?.bookingSettings as any) ?? {};
+
+    // Grid granularity: how far apart slot start times are. Defaults to the
+    // service duration (back-to-back) when unset.
+    const stepMinutes =
+      settings.slotDurationMinutes > 0
+        ? settings.slotDurationMinutes
+        : durationMinutes;
+    // Minimum gap required between appointments (e.g. travel time).
+    const bufferMs = (settings.bufferMinutes ?? 0) * 60 * 1000;
 
     const dayOfWeek = DAY_MAP[civilDayOfWeek(date)];
 
@@ -109,14 +120,20 @@ export class AvailabilityService {
         period.start,
         period.end,
         durationMinutes,
+        stepMinutes,
       );
 
       for (const slot of periodSlots) {
         const slotStart = zonedWallTimeToUtc(date, slot.start, tz);
         const slotEnd = zonedWallTimeToUtc(date, slot.end, tz);
 
+        // A slot conflicts if it overlaps an existing appointment expanded by
+        // the required buffer on both sides.
         const hasConflict = existingAppointments.some((appt) => {
-          return slotStart < appt.endsAt && slotEnd > appt.startsAt;
+          return (
+            slotStart.getTime() < appt.endsAt.getTime() + bufferMs &&
+            slotEnd.getTime() + bufferMs > appt.startsAt.getTime()
+          );
         });
 
         slots.push({
@@ -159,16 +176,20 @@ export class AvailabilityService {
   }
 
   /**
-   * Generate time slots within a period.
-   * Example: generateSlots("09:00", "14:00", 60) →
-   *   [{start:"09:00",end:"10:00"}, {start:"10:00",end:"11:00"}, ...]
+   * Generate time slots within a period. Each slot lasts `durationMinutes`;
+   * start times advance by `stepMinutes` (the grid granularity, which defaults
+   * to the duration for back-to-back slots).
+   * Example: generateSlots("09:00", "14:00", 60, 30) →
+   *   [{09:00→10:00}, {09:30→10:30}, {10:00→11:00}, ...]
    */
   private generateSlots(
     periodStart: string,
     periodEnd: string,
     durationMinutes: number,
+    stepMinutes: number = durationMinutes,
   ): { start: string; end: string }[] {
     const slots: { start: string; end: string }[] = [];
+    const step = stepMinutes > 0 ? stepMinutes : durationMinutes;
 
     let currentMinutes = this.timeToMinutes(periodStart);
     const endMinutes = this.timeToMinutes(periodEnd);
@@ -178,7 +199,7 @@ export class AvailabilityService {
         start: this.minutesToTime(currentMinutes),
         end: this.minutesToTime(currentMinutes + durationMinutes),
       });
-      currentMinutes += durationMinutes;
+      currentMinutes += step;
     }
 
     return slots;

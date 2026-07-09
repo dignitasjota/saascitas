@@ -22,7 +22,8 @@ const TENANT = {
   timezone: 'Europe/Madrid',
   planStatus: 'trialing',
   trialEndsAt: new Date(Date.now() + 10 * 24 * 3600 * 1000),
-  bookingSettings: { minAdvanceHours: 0, autoConfirm: false },
+  // maxAdvanceDays large so the far-future FUTURE_DATE fixture isn't filtered.
+  bookingSettings: { minAdvanceHours: 0, maxAdvanceDays: 36600, autoConfirm: false },
 };
 
 const SERVICE = {
@@ -57,6 +58,7 @@ const mockPrisma = {
   tenant: { findFirst: jest.fn() },
   service: { findFirst: jest.fn() },
   employee: { findFirst: jest.fn(), findMany: jest.fn() },
+  employeeService: { findFirst: jest.fn() },
   customer: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
   appointment: { create: jest.fn(), update: jest.fn() },
   bookingToken: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
@@ -95,9 +97,18 @@ describe('BookingService', () => {
     mockPrisma.tenant.findFirst.mockResolvedValue(TENANT);
     mockPrisma.service.findFirst.mockResolvedValue(SERVICE);
     mockPrisma.employee.findFirst.mockResolvedValue(EMPLOYEE);
+    mockPrisma.employeeService.findFirst.mockResolvedValue({
+      employeeId: EMPLOYEE.id,
+      serviceId: SERVICE.id,
+      tenantId: TENANT.id,
+    });
     mockPrisma.customer.findFirst.mockResolvedValue(null);
     mockPrisma.customer.create.mockResolvedValue({ ...CUSTOMER_INPUT, id: 'cust-1' });
     mockAvailability.isSlotAvailable.mockResolvedValue(true);
+    // The requested slot is available by default.
+    mockAvailability.getAvailableSlots.mockResolvedValue([
+      { start: SLOT, end: '11:00', available: true },
+    ]);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -214,10 +225,40 @@ describe('BookingService', () => {
       );
     });
 
-    it('throws ConflictException when slot is not available', async () => {
-      mockAvailability.isSlotAvailable.mockResolvedValue(false);
+    it('throws ConflictException when the slot is not in real availability', async () => {
+      mockAvailability.getAvailableSlots.mockResolvedValue([
+        { start: SLOT, end: '11:00', available: false },
+      ]);
       await expect(service.createBooking(TENANT.slug, makeDto())).rejects.toThrow(
         ConflictException,
+      );
+    });
+
+    it('throws ConflictException for an off-grid / out-of-hours slot', async () => {
+      // Requested slot not present in the availability grid at all
+      mockAvailability.getAvailableSlots.mockResolvedValue([
+        { start: '09:00', end: '10:00', available: true },
+      ]);
+      await expect(
+        service.createBooking(TENANT.slug, makeDto({ slot: '03:47' })),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('throws BadRequestException when the employee does not offer the service', async () => {
+      mockPrisma.employeeService.findFirst.mockResolvedValue(null);
+      await expect(service.createBooking(TENANT.slug, makeDto())).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('throws BadRequestException when booking beyond maxAdvanceDays', async () => {
+      mockPrisma.tenant.findFirst.mockResolvedValue({
+        ...TENANT,
+        bookingSettings: { minAdvanceHours: 0, maxAdvanceDays: 30, autoConfirm: false },
+      });
+      // FUTURE_DATE (2099) is far beyond 30 days
+      await expect(service.createBooking(TENANT.slug, makeDto())).rejects.toThrow(
+        BadRequestException,
       );
     });
 
@@ -281,7 +322,7 @@ describe('BookingService', () => {
     it('sets status to confirmed when autoConfirm is true', async () => {
       mockPrisma.tenant.findFirst.mockResolvedValue({
         ...TENANT,
-        bookingSettings: { minAdvanceHours: 0, autoConfirm: true },
+        bookingSettings: { minAdvanceHours: 0, maxAdvanceDays: 36600, autoConfirm: true },
       });
 
       let capturedStatus: string | undefined;
@@ -358,6 +399,37 @@ describe('BookingService', () => {
       await new Promise((r) => setImmediate(r));
       expect(mockNotifications.cancelReminder).toHaveBeenCalledWith('appt-1');
       expect(result.message).toContain('cancelled');
+    });
+  });
+
+  // ─── confirmBooking ────────────────────────────────────────────────────────
+
+  describe('confirmBooking', () => {
+    const TOKEN = 'valid-confirm-token';
+
+    const mockConfirmRecord = (status: string) => ({
+      id: 'token-1',
+      token: TOKEN,
+      action: 'confirm',
+      usedAt: null,
+      expiresAt: new Date(Date.now() + 3600 * 1000),
+      appointmentId: 'appt-1',
+      appointment: { id: 'appt-1', status },
+    });
+
+    it('confirms a pending appointment', async () => {
+      mockPrisma.bookingToken.findFirst.mockResolvedValue(mockConfirmRecord('pending'));
+      mockPrisma.$transaction.mockResolvedValue([{}, {}]);
+
+      const result = await service.confirmBooking(TOKEN);
+      expect(mockPrisma.$transaction).toHaveBeenCalled();
+      expect(result.message).toContain('confirmed');
+    });
+
+    it('does not resurrect a cancelled appointment', async () => {
+      mockPrisma.bookingToken.findFirst.mockResolvedValue(mockConfirmRecord('cancelled'));
+      await expect(service.confirmBooking(TOKEN)).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });
   });
 });
