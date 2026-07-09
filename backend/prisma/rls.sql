@@ -72,6 +72,13 @@ CREATE POLICY tenant_isolation_refresh_tokens ON refresh_tokens
 CREATE POLICY tenant_isolation_audit_logs ON audit_logs
   USING (tenant_id = current_setting('app.current_tenant_id', true)::UUID);
 
--- Note: The superuser (saascitas) used by Prisma bypasses RLS.
--- In production, the app should connect as app_user for RLS enforcement.
--- During development, we rely on the Prisma middleware layer for tenant filtering.
+-- Note: The database owner used by Prisma bypasses RLS unless the tables use
+-- FORCE ROW LEVEL SECURITY and the session sets app.current_tenant_id inside a
+-- transaction. This script is an OPTIONAL extra hardening layer for production
+-- (connect the app as the non-owner app_user for it to take effect).
+--
+-- The PRIMARY tenant isolation now runs at the application layer: the Prisma
+-- `tenant-guard` extension (src/common/prisma/tenant-extension.ts) injects the
+-- current tenant (from the per-request AsyncLocalStorage context) into every
+-- query against a tenant-scoped model. See tenant-guard.int-spec.ts for the
+-- verified behaviour.
