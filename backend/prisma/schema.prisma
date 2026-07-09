@@ -325,6 +325,10 @@ model Customer {
 
   @@index([tenantId])
   @@index([tenantId, phone])
+  // NOTE: a partial unique index `customers_tenant_phone_active` on
+  // (tenant_id, phone) WHERE deleted_at IS NULL prevents duplicate active
+  // customers per tenant. Prisma cannot model partial indexes, so it lives in
+  // the migration `*_customer_unique_phone` and must not be dropped.
   @@map("customers")
 }
 

@@ -1,5 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { CreateCustomerDto, UpdateCustomerDto } from './dto/create-customer.dto';
 
 @Injectable()
@@ -55,20 +60,29 @@ export class CustomersService {
   }
 
   async create(tenantId: string, dto: CreateCustomerDto) {
-    return this.prisma.customer.create({
-      data: {
-        tenantId,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        email: dto.email,
-        phone: dto.phone,
-        address: dto.address,
-        city: dto.city,
-        postalCode: dto.postalCode,
-        notes: dto.notes,
-        tags: dto.tags || [],
-      },
-    });
+    try {
+      return await this.prisma.customer.create({
+        data: {
+          tenantId,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          email: dto.email,
+          phone: dto.phone,
+          address: dto.address,
+          city: dto.city,
+          postalCode: dto.postalCode,
+          notes: dto.notes,
+          tags: dto.tags || [],
+        },
+      });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        throw new ConflictException(
+          'Ya existe un cliente con ese teléfono',
+        );
+      }
+      throw err;
+    }
   }
 
   async update(tenantId: string, id: string, dto: UpdateCustomerDto) {

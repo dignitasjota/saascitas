@@ -10,7 +10,10 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AvailabilityService } from '../appointments/availability.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { isOverlapConstraintViolation } from '../../common/utils/prisma-errors';
+import {
+  isOverlapConstraintViolation,
+  isUniqueViolation,
+} from '../../common/utils/prisma-errors';
 import { zonedWallTimeToUtc } from '../../common/utils/timezone';
 import { CreateBookingDto } from './dto/booking.dto';
 
@@ -226,21 +229,33 @@ export class BookingService {
       );
     }
 
-    // Find or create customer by phone within this tenant
+    // Find or create customer by phone within this tenant. The partial unique
+    // index on (tenant_id, phone) closes the race: if a concurrent booking
+    // created the same customer between our find and create, the create hits
+    // P2002 and we re-fetch the winner instead of inserting a duplicate.
     let customer = await this.prisma.customer.findFirst({
       where: { tenantId: tenant.id, phone: dto.phone, deletedAt: null },
     });
 
     if (!customer) {
-      customer = await this.prisma.customer.create({
-        data: {
-          tenantId: tenant.id,
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          phone: dto.phone,
-          email: dto.email,
-        },
-      });
+      try {
+        customer = await this.prisma.customer.create({
+          data: {
+            tenantId: tenant.id,
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            phone: dto.phone,
+            email: dto.email,
+          },
+        });
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          customer = await this.prisma.customer.findFirst({
+            where: { tenantId: tenant.id, phone: dto.phone, deletedAt: null },
+          });
+        }
+        if (!customer) throw err;
+      }
     }
 
     // Create appointment in a transaction
