@@ -375,6 +375,10 @@ model Appointment {
   @@index([tenantId, employeeId, startsAt])
   @@index([tenantId, customerId, startsAt])
   @@index([tenantId, status, startsAt])
+  // NOTE: a GiST exclusion constraint `appointments_no_overlap` prevents
+  // overlapping active appointments for the same employee. Prisma cannot model
+  // exclusion constraints, so it lives in the migration
+  // `*_appointments_no_overlap_exclusion` and must not be dropped.
   @@map("appointments")
 }
 

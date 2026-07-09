@@ -10,6 +10,7 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AvailabilityService } from '../appointments/availability.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { isOverlapConstraintViolation } from '../../common/utils/prisma-errors';
 import { CreateBookingDto } from './dto/booking.dto';
 
 @Injectable()
@@ -204,58 +205,71 @@ export class BookingService {
     }
 
     // Create appointment in a transaction
-    const result = await this.prisma.$transaction(async (tx) => {
-      const appointment = await tx.appointment.create({
-        data: {
-          tenantId: tenant.id,
-          employeeId: dto.employeeId,
-          customerId: customer!.id,
-          serviceId: dto.serviceId,
-          startsAt,
-          endsAt,
-          durationMinutes: service.durationMinutes,
-          priceCents: service.priceCents,
-          customerNotes: dto.notes,
-          source: 'booking_page',
-          status: settings?.autoConfirm ? 'confirmed' : 'pending',
-        },
+    let result;
+    try {
+      result = await this.prisma.$transaction(async (tx) => {
+        const appointment = await tx.appointment.create({
+          data: {
+            tenantId: tenant.id,
+            employeeId: dto.employeeId,
+            customerId: customer!.id,
+            serviceId: dto.serviceId,
+            startsAt,
+            endsAt,
+            durationMinutes: service.durationMinutes,
+            priceCents: service.priceCents,
+            customerNotes: dto.notes,
+            source: 'booking_page',
+            status: settings?.autoConfirm ? 'confirmed' : 'pending',
+          },
+        });
+
+        // Create confirmation token (valid 48h)
+        const confirmToken = randomBytes(32).toString('hex');
+        const cancelToken = randomBytes(32).toString('hex');
+
+        await tx.bookingToken.create({
+          data: {
+            tenantId: tenant.id,
+            appointmentId: appointment.id,
+            token: confirmToken,
+            action: 'confirm',
+            expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
+          },
+        });
+
+        await tx.bookingToken.create({
+          data: {
+            tenantId: tenant.id,
+            appointmentId: appointment.id,
+            token: cancelToken,
+            action: 'cancel',
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          },
+        });
+
+        // Update customer stats
+        await tx.customer.update({
+          where: { id: customer!.id },
+          data: {
+            totalAppointments: { increment: 1 },
+            lastAppointmentAt: startsAt,
+          },
+        });
+
+        return { appointment, confirmToken, cancelToken };
       });
-
-      // Create confirmation token (valid 48h)
-      const confirmToken = randomBytes(32).toString('hex');
-      const cancelToken = randomBytes(32).toString('hex');
-
-      await tx.bookingToken.create({
-        data: {
-          tenantId: tenant.id,
-          appointmentId: appointment.id,
-          token: confirmToken,
-          action: 'confirm',
-          expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
-        },
-      });
-
-      await tx.bookingToken.create({
-        data: {
-          tenantId: tenant.id,
-          appointmentId: appointment.id,
-          token: cancelToken,
-          action: 'cancel',
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        },
-      });
-
-      // Update customer stats
-      await tx.customer.update({
-        where: { id: customer!.id },
-        data: {
-          totalAppointments: { increment: 1 },
-          lastAppointmentAt: startsAt,
-        },
-      });
-
-      return { appointment, confirmToken, cancelToken };
-    });
+    } catch (err) {
+      // Race safety net: the slot was taken by a concurrent booking between
+      // the isSlotAvailable check above and this insert. The DB exclusion
+      // constraint rejects the overlap; surface it as a clean 409.
+      if (isOverlapConstraintViolation(err)) {
+        throw new ConflictException(
+          'This time slot is no longer available. Please choose another.',
+        );
+      }
+      throw err;
+    }
 
     // Queue notifications (fire-and-forget — don't block the response)
     void this.notificationsService

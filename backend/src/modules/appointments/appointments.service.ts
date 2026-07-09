@@ -6,11 +6,15 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AvailabilityService } from './availability.service';
+import { isOverlapConstraintViolation } from '../../common/utils/prisma-errors';
 import {
   CreateAppointmentDto,
   UpdateAppointmentDto,
   UpdateStatusDto,
 } from './dto/create-appointment.dto';
+
+const SLOT_TAKEN_MESSAGE =
+  'This time slot is not available. The employee already has an appointment.';
 
 @Injectable()
 export class AppointmentsService {
@@ -115,9 +119,7 @@ export class AppointmentsService {
     );
 
     if (!isAvailable) {
-      throw new ConflictException(
-        'This time slot is not available. The employee already has an appointment.',
-      );
+      throw new ConflictException(SLOT_TAKEN_MESSAGE);
     }
 
     // Verify employee exists
@@ -138,29 +140,39 @@ export class AppointmentsService {
       throw new BadRequestException('Customer not found');
     }
 
-    const appointment = await this.prisma.appointment.create({
-      data: {
-        tenantId,
-        employeeId: dto.employeeId,
-        customerId: dto.customerId,
-        serviceId: dto.serviceId,
-        startsAt,
-        endsAt,
-        durationMinutes,
-        address: dto.address,
-        city: dto.city,
-        postalCode: dto.postalCode,
-        notes: dto.notes,
-        customerNotes: dto.customerNotes,
-        priceCents,
-        source: 'manual',
-      },
-      include: {
-        employee: { select: { id: true, firstName: true, lastName: true } },
-        customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
-        service: { select: { id: true, name: true } },
-      },
-    });
+    let appointment;
+    try {
+      appointment = await this.prisma.appointment.create({
+        data: {
+          tenantId,
+          employeeId: dto.employeeId,
+          customerId: dto.customerId,
+          serviceId: dto.serviceId,
+          startsAt,
+          endsAt,
+          durationMinutes,
+          address: dto.address,
+          city: dto.city,
+          postalCode: dto.postalCode,
+          notes: dto.notes,
+          customerNotes: dto.customerNotes,
+          priceCents,
+          source: 'manual',
+        },
+        include: {
+          employee: { select: { id: true, firstName: true, lastName: true } },
+          customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
+          service: { select: { id: true, name: true } },
+        },
+      });
+    } catch (err) {
+      // Race safety net: another appointment for the same slot was created
+      // between the availability check and this insert.
+      if (isOverlapConstraintViolation(err)) {
+        throw new ConflictException(SLOT_TAKEN_MESSAGE);
+      }
+      throw err;
+    }
 
     // Update customer stats
     await this.prisma.customer.update({
@@ -183,12 +195,13 @@ export class AppointmentsService {
       );
     }
 
+    const timeChanged = Boolean(dto.startsAt || dto.durationMinutes);
     const startsAt = dto.startsAt ? new Date(dto.startsAt) : existing.startsAt;
     const durationMinutes = dto.durationMinutes || existing.durationMinutes;
     const endsAt = new Date(startsAt.getTime() + durationMinutes * 60 * 1000);
 
     // If time changed, check for conflicts
-    if (dto.startsAt || dto.durationMinutes) {
+    if (timeChanged) {
       const isAvailable = await this.availabilityService.isSlotAvailable(
         tenantId,
         existing.employeeId,
@@ -198,30 +211,37 @@ export class AppointmentsService {
       );
 
       if (!isAvailable) {
-        throw new ConflictException(
-          'This time slot is not available. The employee already has an appointment.',
-        );
+        throw new ConflictException(SLOT_TAKEN_MESSAGE);
       }
     }
 
-    return this.prisma.appointment.update({
-      where: { id },
-      data: {
-        ...(dto.startsAt && { startsAt }),
-        ...(dto.durationMinutes && { durationMinutes, endsAt }),
-        ...(dto.address !== undefined && { address: dto.address }),
-        ...(dto.city !== undefined && { city: dto.city }),
-        ...(dto.postalCode !== undefined && { postalCode: dto.postalCode }),
-        ...(dto.notes !== undefined && { notes: dto.notes }),
-        ...(dto.customerNotes !== undefined && { customerNotes: dto.customerNotes }),
-        ...(dto.priceCents !== undefined && { priceCents: dto.priceCents }),
-      },
-      include: {
-        employee: { select: { id: true, firstName: true, lastName: true } },
-        customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
-        service: { select: { id: true, name: true } },
-      },
-    });
+    try {
+      return await this.prisma.appointment.update({
+        where: { id },
+        data: {
+          // Always persist the three time fields together so endsAt stays
+          // consistent with startsAt/durationMinutes (moving startsAt alone
+          // must recompute endsAt, not leave the old value).
+          ...(timeChanged && { startsAt, durationMinutes, endsAt }),
+          ...(dto.address !== undefined && { address: dto.address }),
+          ...(dto.city !== undefined && { city: dto.city }),
+          ...(dto.postalCode !== undefined && { postalCode: dto.postalCode }),
+          ...(dto.notes !== undefined && { notes: dto.notes }),
+          ...(dto.customerNotes !== undefined && { customerNotes: dto.customerNotes }),
+          ...(dto.priceCents !== undefined && { priceCents: dto.priceCents }),
+        },
+        include: {
+          employee: { select: { id: true, firstName: true, lastName: true } },
+          customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
+          service: { select: { id: true, name: true } },
+        },
+      });
+    } catch (err) {
+      if (isOverlapConstraintViolation(err)) {
+        throw new ConflictException(SLOT_TAKEN_MESSAGE);
+      }
+      throw err;
+    }
   }
 
   async updateStatus(tenantId: string, id: string, dto: UpdateStatusDto) {

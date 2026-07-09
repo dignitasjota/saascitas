@@ -244,6 +244,18 @@ describe('AppointmentsService', () => {
         }),
       );
     });
+
+    it('maps the DB overlap exclusion violation to ConflictException (race safety net)', async () => {
+      mockPrisma.appointment.create.mockRejectedValue({
+        code: '23P01',
+        message:
+          'conflicting key value violates exclusion constraint "appointments_no_overlap"',
+      });
+
+      await expect(service.create(TENANT, dto)).rejects.toThrow(
+        ConflictException,
+      );
+    });
   });
 
   // ── updateStatus ────────────────────────────────────────────────────────────
@@ -331,6 +343,45 @@ describe('AppointmentsService', () => {
     it('throws ConflictException when new time slot is taken', async () => {
       mockPrisma.appointment.findFirst.mockResolvedValue(makeAppointment());
       mockAvailability.isSlotAvailable.mockResolvedValue(false);
+
+      await expect(
+        service.update(TENANT, 'appt-1', {
+          startsAt: new Date('2026-03-10T14:00:00.000Z').toISOString(),
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('recomputes endsAt when only startsAt changes (no duration provided)', async () => {
+      // Base appointment: 10:00→11:00, duration 60. Moving startsAt to 14:00
+      // without a new duration must persist endsAt = 15:00, not the stale 11:00.
+      mockPrisma.appointment.findFirst.mockResolvedValue(makeAppointment());
+      mockAvailability.isSlotAvailable.mockResolvedValue(true);
+      mockPrisma.appointment.update.mockResolvedValue(makeAppointment());
+
+      const newStart = new Date('2026-03-10T14:00:00.000Z');
+      await service.update(TENANT, 'appt-1', {
+        startsAt: newStart.toISOString(),
+      });
+
+      expect(mockPrisma.appointment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            startsAt: newStart,
+            durationMinutes: 60,
+            endsAt: new Date('2026-03-10T15:00:00.000Z'),
+          }),
+        }),
+      );
+    });
+
+    it('maps the DB overlap exclusion violation to ConflictException (race safety net)', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(makeAppointment());
+      mockAvailability.isSlotAvailable.mockResolvedValue(true);
+      mockPrisma.appointment.update.mockRejectedValue({
+        code: '23P01',
+        message:
+          'conflicting key value violates exclusion constraint "appointments_no_overlap"',
+      });
 
       await expect(
         service.update(TENANT, 'appt-1', {
