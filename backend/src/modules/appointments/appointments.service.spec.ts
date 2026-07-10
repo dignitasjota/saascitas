@@ -45,7 +45,7 @@ describe('AppointmentsService', () => {
   let prisma: any;
   let availability: jest.Mocked<AvailabilityService>;
 
-  const mockPrisma = {
+  const mockPrisma: any = {
     appointment: {
       findMany: jest.fn(),
       findFirst: jest.fn(),
@@ -58,6 +58,8 @@ describe('AppointmentsService', () => {
       findFirst: jest.fn(),
       update: jest.fn(),
     },
+    // Interactive transaction: run the callback with the mock itself as `tx`.
+    $transaction: jest.fn((fn: any) => fn(mockPrisma)),
   };
 
   const mockAvailability = {
@@ -344,6 +346,34 @@ describe('AppointmentsService', () => {
       await service.updateStatus(TENANT, 'appt-1', { status: 'confirmed' });
 
       expect(mockNotifications.cancelReminder).not.toHaveBeenCalled();
+    });
+
+    it('decrements the customer appointment count when cancelling', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'pending', customerId: 'cust-1' }),
+      );
+      mockPrisma.appointment.update.mockResolvedValue({});
+
+      await service.updateStatus(TENANT, 'appt-1', { status: 'cancelled' });
+
+      expect(mockPrisma.customer.update).toHaveBeenCalledWith({
+        where: { id: 'cust-1' },
+        data: { totalAppointments: { decrement: 1 } },
+      });
+    });
+
+    it('adds the price to the customer total spent when completing', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'in_progress', customerId: 'cust-1', priceCents: 5000 }),
+      );
+      mockPrisma.appointment.update.mockResolvedValue({});
+
+      await service.updateStatus(TENANT, 'appt-1', { status: 'completed' });
+
+      expect(mockPrisma.customer.update).toHaveBeenCalledWith({
+        where: { id: 'cust-1' },
+        data: { totalSpentCents: { increment: BigInt(5000) } },
+      });
     });
   });
 

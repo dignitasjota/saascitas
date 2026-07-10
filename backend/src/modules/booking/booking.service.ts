@@ -409,6 +409,11 @@ export class BookingService {
           cancellationReason: reason ?? 'Cancelled by customer',
         },
       }),
+      // Undo the +1 added to the customer at booking time.
+      this.prisma.customer.update({
+        where: { id: appt.customerId },
+        data: { totalAppointments: { decrement: 1 } },
+      }),
     ]);
 
     // Remove queued reminder if not yet sent

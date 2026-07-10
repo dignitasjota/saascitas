@@ -27,7 +27,8 @@ export class CustomersService {
       where,
       take: limit + 1, // Fetch one extra to detect if there's a next page
       ...(cursor && { cursor: { id: cursor }, skip: 1 }),
-      orderBy: { createdAt: 'desc' },
+      // id tiebreaker for a total order so cursor pagination is stable.
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
     const hasMore = customers.length > limit;

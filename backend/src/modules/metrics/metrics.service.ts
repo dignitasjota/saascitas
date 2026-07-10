@@ -158,15 +158,18 @@ export class MetricsService {
   // ─── Private helpers ─────────────────────────────────────────────────────────
 
   private async getPeriodStats(tenantId: string, from: Date, to: Date) {
+    // Half-open range [from, to): the boundary instant (subDays(now, 30) is both
+    // the current period's start and the previous period's end) must not be
+    // counted in both periods.
     const [appointments, customers] = await Promise.all([
       this.prisma.appointment.groupBy({
         by: ['status'],
-        where: { tenantId, startsAt: { gte: from, lte: to } },
+        where: { tenantId, startsAt: { gte: from, lt: to } },
         _count: { _all: true },
         _sum: { priceCents: true },
       }),
       this.prisma.customer.count({
-        where: { tenantId, createdAt: { gte: from, lte: to }, deletedAt: null },
+        where: { tenantId, createdAt: { gte: from, lt: to }, deletedAt: null },
       }),
     ]);
 

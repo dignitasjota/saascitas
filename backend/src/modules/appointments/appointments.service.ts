@@ -4,6 +4,7 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
+import { AppointmentStatus } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AvailabilityService } from './availability.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -24,6 +25,7 @@ import {
 const SLOT_TAKEN_MESSAGE =
   'This time slot is not available. The employee already has an appointment.';
 const DEFAULT_TZ = 'Europe/Madrid';
+const VALID_STATUSES = Object.values(AppointmentStatus) as string[];
 
 @Injectable()
 export class AppointmentsService {
@@ -53,7 +55,12 @@ export class AppointmentsService {
     }
 
     if (options.employeeId) where.employeeId = options.employeeId;
-    if (options.status) where.status = options.status;
+    if (options.status) {
+      if (!VALID_STATUSES.includes(options.status)) {
+        throw new BadRequestException(`Invalid status: ${options.status}`);
+      }
+      where.status = options.status;
+    }
 
     const limit = options.limit || 50;
 
@@ -66,7 +73,9 @@ export class AppointmentsService {
         customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
         service: { select: { id: true, name: true, color: true } },
       },
-      orderBy: { startsAt: 'asc' },
+      // id tiebreaker so cursor pagination is stable when several appointments
+      // share the same startsAt.
+      orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
     });
 
     const hasMore = appointments.length > limit;
@@ -292,9 +301,25 @@ export class AppointmentsService {
       updateData.cancellationReason = dto.cancellationReason;
     }
 
-    const updated = await this.prisma.appointment.update({
-      where: { id },
-      data: updateData,
+    // Keep customer stats consistent with the status change, atomically:
+    //  - cancelling undoes the +1 added at creation
+    //  - completing adds the appointment price to the customer's total spent
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const appt = await tx.appointment.update({ where: { id }, data: updateData });
+
+      if (dto.status === 'cancelled') {
+        await tx.customer.update({
+          where: { id: existing.customerId },
+          data: { totalAppointments: { decrement: 1 } },
+        });
+      } else if (dto.status === 'completed' && existing.priceCents) {
+        await tx.customer.update({
+          where: { id: existing.customerId },
+          data: { totalSpentCents: { increment: BigInt(existing.priceCents) } },
+        });
+      }
+
+      return appt;
     });
 
     // Drop the queued reminder for a cancelled appointment (fire-and-forget).
@@ -311,10 +336,13 @@ export class AppointmentsService {
     to: string,
     employeeId?: string,
   ) {
+    // Overlap, not containment: an appointment that starts before `from` or
+    // ends after `to` but still overlaps the window must appear (e.g. a
+    // 23:30→00:30 booking, or one straddling the requested day view).
     const where: any = {
       tenantId,
-      startsAt: { gte: new Date(from) },
-      endsAt: { lte: new Date(to) },
+      startsAt: { lt: new Date(to) },
+      endsAt: { gt: new Date(from) },
       status: { notIn: ['cancelled'] },
     };
 
@@ -327,7 +355,7 @@ export class AppointmentsService {
         customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
         service: { select: { id: true, name: true, color: true } },
       },
-      orderBy: { startsAt: 'asc' },
+      orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
     });
   }
 

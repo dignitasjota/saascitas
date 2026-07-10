@@ -86,7 +86,7 @@ export class AdminService {
       where,
       take: limit + 1,
       ...(options.cursor && { cursor: { id: options.cursor }, skip: 1 }),
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: {
         _count: {
           select: { users: true, appointments: true, customers: true },
