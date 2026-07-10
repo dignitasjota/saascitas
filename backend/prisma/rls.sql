@@ -3,14 +3,13 @@
 -- Run after Prisma migrations: psql $DATABASE_URL -f prisma/rls.sql
 -- ============================================
 
--- Create application role (non-superuser, RLS applies)
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN
-    CREATE ROLE app_user LOGIN PASSWORD 'app_user_password';
-  END IF;
-END
-$$;
+-- Create application role (non-superuser, RLS applies). The password is passed
+-- as a psql variable so no secret is committed to the repo:
+--   psql "$DATABASE_URL" -v app_user_password="$APP_USER_PASSWORD" -f prisma/rls.sql
+-- %L quotes it safely; the role is created only if it doesn't already exist.
+SELECT format('CREATE ROLE app_user LOGIN PASSWORD %L', :'app_user_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user')
+\gexec
 
 -- Grant permissions to app_user
 GRANT USAGE ON SCHEMA public TO app_user;
