@@ -5,6 +5,7 @@ import { Plus, Wrench, Clock, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import { useServices, useCreateService, useDeleteService } from '@/hooks/use-services'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
@@ -25,7 +26,7 @@ type FormData = z.infer<typeof schema>
 
 export default function ServicesPage() {
   const [showNew, setShowNew] = useState(false)
-  const { data: services = [], isLoading } = useServices()
+  const { data: services = [], isLoading, isError, refetch } = useServices()
   const deleteService = useDeleteService()
 
   return (
@@ -43,7 +44,11 @@ export default function ServicesPage() {
         </div>
       )}
 
-      {!isLoading && services.length === 0 && (
+      {isError && (
+        <ErrorState message="No se pudieron cargar los servicios" onRetry={() => refetch()} />
+      )}
+
+      {!isLoading && !isError && services.length === 0 && (
         <div className="rounded-lg border border-dashed p-10 text-center">
           <Wrench className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
           <p className="text-sm font-medium">No hay servicios</p>

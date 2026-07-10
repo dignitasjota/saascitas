@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import { toast } from 'sonner'
 import apiClient from '@/lib/api-client'
 import { useAuthStore } from '@/stores/auth-store'
@@ -234,7 +235,7 @@ function PasswordSection() {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
-  const { data: profile, isLoading } = useQuery<ProfileData>({
+  const { data: profile, isLoading, isError, refetch } = useQuery<ProfileData>({
     queryKey: ['profile'],
     queryFn: async () => {
       const res = await apiClient.get('/users/me')
@@ -263,6 +264,8 @@ export default function ProfilePage() {
             <Skeleton className="h-10 w-full" />
           </Card>
         </div>
+      ) : isError ? (
+        <ErrorState message="No se pudo cargar tu perfil" onRetry={() => refetch()} />
       ) : profile ? (
         <>
           <ProfileSection profile={profile} />

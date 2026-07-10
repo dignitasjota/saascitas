@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import { toast } from 'sonner'
 import { formatPrice } from '@/lib/utils'
 
@@ -163,7 +164,7 @@ export function BookingFlow({ business }: { business: Business }) {
 // ─── Step 1: Service selection ────────────────────────────────────────────────
 
 function ServiceStep({ slug, onSelect }: { slug: string; onSelect: (s: Service) => void }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['booking', slug, 'services'],
     queryFn: () => fetchJSON(`/booking/${slug}/services`).then(r => r.data as Service[]),
   })
@@ -179,6 +180,10 @@ function ServiceStep({ slug, onSelect }: { slug: string; onSelect: (s: Service) 
         <div className="space-y-3">
           {[1,2,3].map(i => <Skeleton key={i} className="h-20 rounded-xl" />)}
         </div>
+      )}
+
+      {isError && (
+        <ErrorState message="No se pudieron cargar los servicios" onRetry={() => refetch()} />
       )}
 
       <div className="space-y-2">
@@ -222,7 +227,7 @@ function ServiceStep({ slug, onSelect }: { slug: string; onSelect: (s: Service) 
 function EmployeeStep({
   slug, serviceId, onSelect, onBack,
 }: { slug: string; serviceId: string; onSelect: (e: Employee) => void; onBack: () => void }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['booking', slug, 'employees', serviceId],
     queryFn: () => fetchJSON(`/booking/${slug}/employees?serviceId=${serviceId}`).then(r => r.data as Employee[]),
   })
@@ -238,6 +243,10 @@ function EmployeeStep({
       </div>
 
       {isLoading && <div className="space-y-3">{[1,2].map(i => <Skeleton key={i} className="h-16 rounded-xl" />)}</div>}
+
+      {isError && (
+        <ErrorState message="No se pudieron cargar los técnicos" onRetry={() => refetch()} />
+      )}
 
       <div className="space-y-2">
         {data?.map(emp => (

@@ -20,6 +20,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import apiClient from '@/lib/api-client'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -223,7 +224,7 @@ export default function BillingPage() {
   const [upgrading, setUpgrading] = useState<PlanKey | null>(null)
   const [portalLoading, setPortalLoading] = useState(false)
 
-  const { data: billing, isLoading } = useQuery<BillingStatus>({
+  const { data: billing, isLoading, isError, refetch } = useQuery<BillingStatus>({
     queryKey: ['billing-status'],
     queryFn: async () => {
       const res = await apiClient.get('/billing/status')
@@ -269,6 +270,20 @@ export default function BillingPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {[1, 2, 3].map((i) => <Skeleton key={i} className="h-80 rounded-2xl" />)}
         </div>
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Facturación y plan</h1>
+          <p className="text-muted-foreground mt-1">
+            Gestiona tu suscripción y métodos de pago
+          </p>
+        </div>
+        <ErrorState message="No se pudo cargar la información de facturación" onRetry={() => refetch()} />
       </div>
     )
   }

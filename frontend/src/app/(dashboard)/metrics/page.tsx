@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import apiClient from '@/lib/api-client'
 import { formatPrice } from '@/lib/utils'
 
@@ -132,6 +133,18 @@ export default function MetricsPage() {
   const kpis = overview.data?.kpis
   const topServices = overview.data?.topServices ?? []
   const recentActivity = overview.data?.recentActivity ?? []
+
+  if (overview.isError) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Métricas</h1>
+          <p className="text-sm text-muted-foreground mt-1">Últimos 30 días comparados con el período anterior</p>
+        </div>
+        <ErrorState message="No se pudieron cargar las métricas" onRetry={() => overview.refetch()} />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">

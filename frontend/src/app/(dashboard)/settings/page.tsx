@@ -14,6 +14,7 @@ import { Card } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import apiClient from '@/lib/api-client'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -129,11 +130,23 @@ export default function SettingsPage() {
         </TabsList>
 
         <TabsContent value="business">
-          {tenant.isLoading ? <FormSkeleton /> : tenant.data && <BusinessSection tenant={tenant.data} />}
+          {tenant.isLoading ? (
+            <FormSkeleton />
+          ) : tenant.isError ? (
+            <ErrorState message="No se pudieron cargar los datos del negocio" onRetry={() => tenant.refetch()} />
+          ) : (
+            tenant.data && <BusinessSection tenant={tenant.data} />
+          )}
         </TabsContent>
 
         <TabsContent value="booking">
-          {tenant.isLoading ? <FormSkeleton /> : tenant.data && <BookingSection tenant={tenant.data} />}
+          {tenant.isLoading ? (
+            <FormSkeleton />
+          ) : tenant.isError ? (
+            <ErrorState message="No se pudieron cargar los datos del negocio" onRetry={() => tenant.refetch()} />
+          ) : (
+            tenant.data && <BookingSection tenant={tenant.data} />
+          )}
         </TabsContent>
 
         <TabsContent value="hours">
@@ -313,7 +326,7 @@ type DaySchedule = {
 
 function HoursSection({ employeeId, employeeName }: { employeeId: string; employeeName: string }) {
   const qc = useQueryClient()
-  const { data: hours, isLoading } = useQuery({
+  const { data: hours, isLoading, isError, refetch } = useQuery({
     queryKey: ['working-hours', employeeId],
     queryFn: () => fetchWorkingHours(employeeId),
   })
@@ -374,6 +387,8 @@ function HoursSection({ employeeId, employeeName }: { employeeId: string; employ
         <div className="space-y-3">
           {DAYS.map((d) => <Skeleton key={d.key} className="h-14 rounded-xl" />)}
         </div>
+      ) : isError ? (
+        <ErrorState message="No se pudieron cargar los horarios" onRetry={() => refetch()} />
       ) : (
         <div className="space-y-2">
           {DAYS.map((d) => {

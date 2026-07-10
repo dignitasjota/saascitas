@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import {
   Dialog,
   DialogContent,
@@ -440,7 +441,7 @@ export default function UsersPage() {
   const [editingUser, setEditingUser] = useState<TenantUser | null>(null)
   const [deletingUser, setDeletingUser] = useState<TenantUser | null>(null)
 
-  const { data: users = [], isLoading } = useQuery<TenantUser[]>({
+  const { data: users = [], isLoading, isError, refetch } = useQuery<TenantUser[]>({
     queryKey: ['users'],
     queryFn: async () => {
       const res = await apiClient.get('/users')
@@ -506,6 +507,10 @@ export default function UsersPage() {
                 </div>
               </div>
             ))}
+          </div>
+        ) : isError ? (
+          <div className="p-4">
+            <ErrorState message="No se pudieron cargar los usuarios" onRetry={() => refetch()} />
           </div>
         ) : users.length === 0 ? (
           <div className="py-12 text-center text-muted-foreground text-sm">

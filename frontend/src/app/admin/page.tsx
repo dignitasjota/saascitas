@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { Building2, Users, CalendarDays, TrendingUp } from 'lucide-react'
+import { ErrorState } from '@/components/ui/error-state'
 import apiClient from '@/lib/api-client'
 
 interface AdminStats {
@@ -15,7 +16,7 @@ interface AdminStats {
 }
 
 export default function AdminOverviewPage() {
-  const { data: stats, isLoading } = useQuery<AdminStats>({
+  const { data: stats, isLoading, isError, refetch } = useQuery<AdminStats>({
     queryKey: ['admin-stats'],
     queryFn: async () => {
       const res = await apiClient.get('/admin/stats')
@@ -28,6 +29,18 @@ export default function AdminOverviewPage() {
         stats.mrrCents / 100,
       )
     : '—'
+
+  if (isError) {
+    return (
+      <div className="space-y-8">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Platform Overview</h1>
+          <p className="text-gray-400 text-sm mt-1">Métricas globales de la plataforma</p>
+        </div>
+        <ErrorState message="No se pudieron cargar las estadísticas" onRetry={() => refetch()} />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-8">

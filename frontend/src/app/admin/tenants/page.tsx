@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import apiClient from '@/lib/api-client'
 import { formatDate } from '@/lib/utils'
 import { useDebounce } from '@/hooks/use-debounce'
+import { ErrorState } from '@/components/ui/error-state'
 
 interface Tenant {
   id: string
@@ -43,7 +44,7 @@ export default function AdminTenantsPage() {
 
   const qc = useQueryClient()
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['admin-tenants', debouncedSearch, planFilter, statusFilter],
     queryFn: async () => {
       const res = await apiClient.get('/admin/tenants', {
@@ -165,7 +166,15 @@ export default function AdminTenantsPage() {
                 </tr>
               ))}
 
-              {!isLoading && tenants.length === 0 && (
+              {!isLoading && isError && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-6">
+                    <ErrorState message="No se pudieron cargar los tenants" onRetry={() => refetch()} />
+                  </td>
+                </tr>
+              )}
+
+              {!isLoading && !isError && tenants.length === 0 && (
                 <tr>
                   <td colSpan={7} className="text-center text-gray-600 py-12">Sin resultados</td>
                 </tr>

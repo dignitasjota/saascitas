@@ -6,7 +6,9 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AppointmentCard } from '@/components/appointments/appointment-card'
 import { NewAppointmentDialog } from '@/components/appointments/new-appointment-dialog'
+import { ErrorState } from '@/components/ui/error-state'
 import { useQuery } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import apiClient from '@/lib/api-client'
 import type { Appointment } from '@/types/api'
 import { format, subDays, addDays } from 'date-fns'
@@ -19,7 +21,7 @@ export default function AppointmentsPage() {
   const from = format(subDays(new Date(), 1), 'yyyy-MM-dd')
   const to   = format(addDays(new Date(), 30), 'yyyy-MM-dd')
 
-  const { data: appointments = [], isLoading } = useQuery<Appointment[]>({
+  const { data: appointments = [], isLoading, isError, refetch } = useQuery<Appointment[]>({
     queryKey: ['appointments', 'list', from, to],
     queryFn: async () => {
       const res = await apiClient.get('/appointments/calendar', { params: { from, to } })
@@ -31,6 +33,8 @@ export default function AppointmentsPage() {
     setExporting(true)
     try {
       await downloadCsv('/appointments/export', `citas_${from}_${to}.csv`, { from, to })
+    } catch {
+      toast.error('No se pudo exportar el CSV')
     } finally {
       setExporting(false)
     }
@@ -57,7 +61,11 @@ export default function AppointmentsPage() {
         </div>
       )}
 
-      {!isLoading && appointments.length === 0 && (
+      {isError && (
+        <ErrorState message="No se pudieron cargar las citas" onRetry={() => refetch()} />
+      )}
+
+      {!isLoading && !isError && appointments.length === 0 && (
         <p className="text-muted-foreground text-sm py-8 text-center">
           No hay citas en el período seleccionado.
         </p>

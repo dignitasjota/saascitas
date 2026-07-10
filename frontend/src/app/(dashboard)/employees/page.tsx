@@ -5,6 +5,7 @@ import { Plus, UserCog } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import { useEmployees, useCreateEmployee } from '@/hooks/use-employees'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
@@ -28,7 +29,7 @@ const COLORS = ['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899','#14
 
 export default function EmployeesPage() {
   const [showNew, setShowNew] = useState(false)
-  const { data: employees = [], isLoading } = useEmployees()
+  const { data: employees = [], isLoading, isError, refetch } = useEmployees()
 
   return (
     <div className="space-y-5">
@@ -45,7 +46,11 @@ export default function EmployeesPage() {
         </div>
       )}
 
-      {!isLoading && employees.length === 0 && (
+      {isError && (
+        <ErrorState message="No se pudieron cargar los empleados" onRetry={() => refetch()} />
+      )}
+
+      {!isLoading && !isError && employees.length === 0 && (
         <div className="rounded-lg border border-dashed p-10 text-center">
           <UserCog className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
           <p className="text-sm font-medium">No hay empleados</p>

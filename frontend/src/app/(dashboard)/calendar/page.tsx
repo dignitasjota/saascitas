@@ -9,6 +9,7 @@ import { es } from 'date-fns/locale'
 import { ChevronLeft, ChevronRight, Plus, CalendarDays } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import { NewAppointmentDialog } from '@/components/appointments/new-appointment-dialog'
 import { StatusBadge } from '@/components/appointments/status-badge'
 import { useCalendar } from '@/hooks/use-appointments'
@@ -36,7 +37,7 @@ export default function CalendarPage() {
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
 
   const { data: employees = [] } = useEmployees()
-  const { data: appointments = [], isLoading } = useCalendar(
+  const { data: appointments = [], isLoading, isError, refetch } = useCalendar(
     weekStart.toISOString(),
     endOfDay(weekEnd).toISOString(),
     selectedEmployeeId !== 'all' ? selectedEmployeeId : undefined,
@@ -129,6 +130,10 @@ export default function CalendarPage() {
         {isLoading ? (
           <div className="p-6 space-y-3">
             {[1,2,3,4,5].map(i => <Skeleton key={i} className="h-16 w-full" />)}
+          </div>
+        ) : isError ? (
+          <div className="p-6">
+            <ErrorState message="No se pudo cargar el calendario" onRetry={() => refetch()} />
           </div>
         ) : (
           <div className="grid grid-cols-8">
