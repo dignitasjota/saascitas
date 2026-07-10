@@ -12,6 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorState } from '@/components/ui/error-state'
 import { NewAppointmentDialog } from '@/components/appointments/new-appointment-dialog'
 import { StatusBadge } from '@/components/appointments/status-badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useCalendar } from '@/hooks/use-appointments'
 import { useEmployees } from '@/hooks/use-employees'
 import {
@@ -151,14 +152,23 @@ export default function CalendarPage() {
               const dayKey = format(day, 'yyyy-MM-dd')
               const dayAppts = apptsByDay[dayKey] ?? []
 
+              const dayLabel = format(day, "EEEE d 'de' MMMM", { locale: es })
+
               return (
                 <div
                   key={dayKey}
                   className="border-r last:border-r-0 relative"
-                  onClick={() => handleCellClick(day)}
                 >
+                  {/* Empty hour cells are buttons so a new appointment can be
+                      created by mouse or keyboard. */}
                   {HOURS.map(h => (
-                    <div key={h} className="h-16 border-b hover:bg-muted/30 cursor-pointer" />
+                    <button
+                      key={h}
+                      type="button"
+                      onClick={() => handleCellClick(day)}
+                      aria-label={`Crear cita el ${dayLabel}`}
+                      className="block w-full h-16 border-b hover:bg-muted/30 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    />
                   ))}
 
                   {/* Appointments */}
@@ -169,17 +179,20 @@ export default function CalendarPage() {
                     const endH = end.getHours() + end.getMinutes() / 60
                     const top = Math.max(0, (startH - HOUR_START) * 64)
                     const height = Math.max(24, (endH - startH) * 64 - 2)
+                    const name = `${appt.customer?.firstName ?? ''} ${appt.customer?.lastName ?? ''}`.trim()
 
                     return (
-                      <div
+                      <button
                         key={appt.id}
-                        className="absolute left-0.5 right-0.5 rounded px-1.5 py-1 text-white text-xs overflow-hidden cursor-pointer hover:opacity-90 shadow-sm"
+                        type="button"
+                        aria-label={`Cita de ${name} a las ${formatTime(appt.startsAt)}. Ver detalles`}
+                        className="absolute left-0.5 right-0.5 rounded px-1.5 py-1 text-white text-xs text-left overflow-hidden cursor-pointer hover:opacity-90 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
                         style={{
                           top,
                           height,
                           backgroundColor: appt.employee?.color ?? '#3B82F6',
                         }}
-                        onClick={(e) => { e.stopPropagation(); setSelectedAppt(appt) }}
+                        onClick={() => setSelectedAppt(appt)}
                       >
                         <p className="font-semibold truncate">
                           {appt.customer?.firstName} {appt.customer?.lastName}
@@ -189,7 +202,7 @@ export default function CalendarPage() {
                             {formatTime(appt.startsAt)} · {appt.service?.name ?? `${appt.durationMinutes}min`}
                           </p>
                         )}
-                      </div>
+                      </button>
                     )
                   })}
                 </div>
@@ -199,56 +212,50 @@ export default function CalendarPage() {
         )}
       </div>
 
-      {/* Appointment detail panel */}
-      {selectedAppt && (
-        <div
-          className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-4"
-          onClick={() => setSelectedAppt(null)}
-        >
-          <div
-            className="bg-background rounded-xl shadow-xl w-full max-w-sm p-5 space-y-3"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="font-semibold">
-                  {selectedAppt.customer?.firstName} {selectedAppt.customer?.lastName}
-                </p>
+      {/* Appointment detail — Dialog handles focus-trap, Escape and aria-modal */}
+      <Dialog open={!!selectedAppt} onOpenChange={(v) => !v && setSelectedAppt(null)}>
+        <DialogContent className="max-w-sm">
+          {selectedAppt && (
+            <>
+              <DialogHeader>
+                <div className="flex items-start justify-between gap-2">
+                  <DialogTitle>
+                    {selectedAppt.customer?.firstName} {selectedAppt.customer?.lastName}
+                  </DialogTitle>
+                  <StatusBadge status={selectedAppt.status} />
+                </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {formatTime(selectedAppt.startsAt)} – {formatTime(selectedAppt.endsAt)}
                 </p>
+              </DialogHeader>
+
+              <div className="space-y-3">
+                {selectedAppt.service && (
+                  <p className="text-sm">{selectedAppt.service.name}</p>
+                )}
+                {selectedAppt.customer?.phone && (
+                  <p className="text-sm text-muted-foreground">{selectedAppt.customer.phone}</p>
+                )}
+                {(selectedAppt.address || selectedAppt.city) && (
+                  <p className="text-sm text-muted-foreground">
+                    {[selectedAppt.address, selectedAppt.city].filter(Boolean).join(', ')}
+                  </p>
+                )}
+                {selectedAppt.notes && (
+                  <p className="text-sm italic text-muted-foreground">"{selectedAppt.notes}"</p>
+                )}
+                {selectedAppt.priceCents != null && (
+                  <p className="text-sm font-semibold">{formatPrice(selectedAppt.priceCents)}</p>
+                )}
+
+                <Button variant="outline" className="w-full" onClick={() => setSelectedAppt(null)}>
+                  Cerrar
+                </Button>
               </div>
-              <StatusBadge status={selectedAppt.status} />
-            </div>
-
-            {selectedAppt.service && (
-              <p className="text-sm">{selectedAppt.service.name}</p>
-            )}
-
-            {selectedAppt.customer?.phone && (
-              <p className="text-sm text-muted-foreground">{selectedAppt.customer.phone}</p>
-            )}
-
-            {(selectedAppt.address || selectedAppt.city) && (
-              <p className="text-sm text-muted-foreground">
-                {[selectedAppt.address, selectedAppt.city].filter(Boolean).join(', ')}
-              </p>
-            )}
-
-            {selectedAppt.notes && (
-              <p className="text-sm italic text-muted-foreground">"{selectedAppt.notes}"</p>
-            )}
-
-            {selectedAppt.priceCents != null && (
-              <p className="text-sm font-semibold">{formatPrice(selectedAppt.priceCents)}</p>
-            )}
-
-            <Button variant="outline" className="w-full" onClick={() => setSelectedAppt(null)}>
-              Cerrar
-            </Button>
-          </div>
-        </div>
-      )}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <NewAppointmentDialog
         open={showNew}
