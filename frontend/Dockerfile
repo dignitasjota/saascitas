@@ -3,9 +3,11 @@ FROM node:20-alpine AS deps
 
 WORKDIR /app
 # Built in isolation (build context is ./frontend), so there is no root
-# lockfile here; use `npm install` rather than `npm ci`.
+# lockfile here; use `npm install` rather than `npm ci`. --ignore-scripts skips
+# dependency lifecycle hooks (not needed for a pure-JS frontend) and avoids a
+# hanging postinstall.
 COPY package.json ./
-RUN npm install --no-audit --no-fund
+RUN npm install --ignore-scripts --no-audit --no-fund
 
 # ── Stage 2: build ────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
