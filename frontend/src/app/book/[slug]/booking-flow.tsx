@@ -436,32 +436,32 @@ function DetailsStep({
       <form onSubmit={handleSubmit(d => mutation.mutate(d))} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <Label>Nombre *</Label>
-            <Input placeholder="Juan" {...register('firstName')} />
+            <Label htmlFor="firstName">Nombre *</Label>
+            <Input id="firstName" placeholder="Juan" {...register('firstName')} />
             {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
           </div>
           <div className="space-y-1.5">
-            <Label>Apellido *</Label>
-            <Input placeholder="García" {...register('lastName')} />
+            <Label htmlFor="lastName">Apellido *</Label>
+            <Input id="lastName" placeholder="García" {...register('lastName')} />
             {errors.lastName && <p className="text-xs text-destructive">{errors.lastName.message}</p>}
           </div>
         </div>
 
         <div className="space-y-1.5">
-          <Label>Teléfono *</Label>
-          <Input type="tel" placeholder="+34 600 000 000" {...register('phone')} />
+          <Label htmlFor="phone">Teléfono *</Label>
+          <Input id="phone" type="tel" placeholder="+34 600 000 000" {...register('phone')} />
           {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
         </div>
 
         <div className="space-y-1.5">
-          <Label>Email <span className="text-muted-foreground">(para confirmación)</span></Label>
-          <Input type="email" placeholder="tu@email.com" {...register('email')} />
+          <Label htmlFor="email">Email <span className="text-muted-foreground">(para confirmación)</span></Label>
+          <Input id="email" type="email" placeholder="tu@email.com" {...register('email')} />
           {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
         </div>
 
         <div className="space-y-1.5">
-          <Label>Notas <span className="text-muted-foreground">(opcional)</span></Label>
-          <Input placeholder="Indicaciones, acceso al edificio..." {...register('notes')} />
+          <Label htmlFor="notes">Notas <span className="text-muted-foreground">(opcional)</span></Label>
+          <Input id="notes" placeholder="Indicaciones, acceso al edificio..." {...register('notes')} />
         </div>
 
         <Button type="submit" className="w-full" size="lg" disabled={mutation.isPending}>

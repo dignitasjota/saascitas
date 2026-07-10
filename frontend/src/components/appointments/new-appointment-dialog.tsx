@@ -112,12 +112,12 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           {/* Employee */}
           <div className="space-y-1.5">
-            <Label>Empleado</Label>
+            <Label id="appointment-employee-label">Empleado</Label>
             <Select
               value={watch('employeeId')}
               onValueChange={(v) => { setValue('employeeId', v ?? ''); setValue('slot', '') }}
             >
-              <SelectTrigger>
+              <SelectTrigger aria-labelledby="appointment-employee-label">
                 <SelectValue placeholder="Seleccionar empleado" />
               </SelectTrigger>
               <SelectContent>
@@ -136,12 +136,12 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
 
           {/* Service */}
           <div className="space-y-1.5">
-            <Label>Servicio <span className="text-muted-foreground">(opcional)</span></Label>
+            <Label id="appointment-service-label">Servicio <span className="text-muted-foreground">(opcional)</span></Label>
             <Select
               value={watch('serviceId') ?? ''}
               onValueChange={(v) => { setValue('serviceId', (v ?? '') as any); setValue('slot', '') }}
             >
-              <SelectTrigger>
+              <SelectTrigger aria-labelledby="appointment-service-label">
                 <SelectValue placeholder="Sin servicio específico" />
               </SelectTrigger>
               <SelectContent>
@@ -158,8 +158,9 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
 
           {/* Customer */}
           <div className="space-y-1.5">
-            <Label>Cliente</Label>
+            <Label id="appointment-customer-label" htmlFor="appointment-customer-search">Cliente</Label>
             <Input
+              id="appointment-customer-search"
               placeholder="Buscar cliente por nombre o teléfono..."
               value={customerSearch}
               onChange={(e) => setCustomerSearch(e.target.value)}
@@ -169,7 +170,7 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
               value={watch('customerId')}
               onValueChange={(v) => setValue('customerId', v ?? '')}
             >
-              <SelectTrigger>
+              <SelectTrigger aria-labelledby="appointment-customer-label">
                 <SelectValue placeholder="Seleccionar cliente" />
               </SelectTrigger>
               <SelectContent>
@@ -186,8 +187,9 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
           {/* Date + Slot */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Fecha</Label>
+              <Label htmlFor="appointment-date">Fecha</Label>
               <Input
+                id="appointment-date"
                 type="date"
                 {...register('date')}
                 onChange={(e) => { setValue('date', e.target.value); setValue('slot', '') }}
@@ -196,13 +198,13 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
             </div>
 
             <div className="space-y-1.5">
-              <Label>Hora</Label>
+              <Label id="appointment-slot-label">Hora</Label>
               <Select
                 value={watch('slot')}
                 onValueChange={(v) => setValue('slot', v ?? '')}
                 disabled={!watchedEmployeeId || !watchedDate}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-labelledby="appointment-slot-label">
                   <SelectValue placeholder={
                     !watchedEmployeeId ? 'Elige empleado' :
                     availableSlots.length === 0 ? 'Sin huecos' :
@@ -224,19 +226,19 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
           {/* Address */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Dirección <span className="text-muted-foreground">(opcional)</span></Label>
-              <Input placeholder="Calle Mayor 15, 3B" {...register('address')} />
+              <Label htmlFor="appointment-address">Dirección <span className="text-muted-foreground">(opcional)</span></Label>
+              <Input id="appointment-address" placeholder="Calle Mayor 15, 3B" {...register('address')} />
             </div>
             <div className="space-y-1.5">
-              <Label>Ciudad</Label>
-              <Input placeholder="Madrid" {...register('city')} />
+              <Label htmlFor="appointment-city">Ciudad</Label>
+              <Input id="appointment-city" placeholder="Madrid" {...register('city')} />
             </div>
           </div>
 
           {/* Notes */}
           <div className="space-y-1.5">
-            <Label>Notas internas <span className="text-muted-foreground">(opcional)</span></Label>
-            <Input placeholder="Llamar antes de subir..." {...register('notes')} />
+            <Label htmlFor="appointment-notes">Notas internas <span className="text-muted-foreground">(opcional)</span></Label>
+            <Input id="appointment-notes" placeholder="Llamar antes de subir..." {...register('notes')} />
           </div>
 
           <DialogFooter>

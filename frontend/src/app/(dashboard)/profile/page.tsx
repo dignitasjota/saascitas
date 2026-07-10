@@ -130,20 +130,20 @@ function ProfileSection({ profile }: { profile: ProfileData }) {
       <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
-            <Label>Nombre</Label>
-            <Input {...register('firstName')} />
+            <Label htmlFor="firstName">Nombre</Label>
+            <Input id="firstName" {...register('firstName')} />
             {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
           </div>
           <div className="space-y-1">
-            <Label>Apellidos</Label>
-            <Input {...register('lastName')} />
+            <Label htmlFor="lastName">Apellidos</Label>
+            <Input id="lastName" {...register('lastName')} />
             {errors.lastName && <p className="text-xs text-destructive">{errors.lastName.message}</p>}
           </div>
         </div>
 
         <div className="space-y-1">
-          <Label>Teléfono <span className="text-muted-foreground text-xs">(opcional)</span></Label>
-          <Input {...register('phone')} type="tel" placeholder="+34 600 000 000" />
+          <Label htmlFor="phone">Teléfono <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+          <Input id="phone" {...register('phone')} type="tel" placeholder="+34 600 000 000" />
         </div>
 
         <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
@@ -200,24 +200,24 @@ function PasswordSection() {
 
       <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4 max-w-sm">
         <div className="space-y-1">
-          <Label>Contraseña actual</Label>
-          <Input {...register('currentPassword')} type="password" autoComplete="current-password" />
+          <Label htmlFor="currentPassword">Contraseña actual</Label>
+          <Input id="currentPassword" {...register('currentPassword')} type="password" autoComplete="current-password" />
           {errors.currentPassword && (
             <p className="text-xs text-destructive">{errors.currentPassword.message}</p>
           )}
         </div>
 
         <div className="space-y-1">
-          <Label>Nueva contraseña</Label>
-          <Input {...register('newPassword')} type="password" autoComplete="new-password" />
+          <Label htmlFor="newPassword">Nueva contraseña</Label>
+          <Input id="newPassword" {...register('newPassword')} type="password" autoComplete="new-password" />
           {errors.newPassword && (
             <p className="text-xs text-destructive">{errors.newPassword.message}</p>
           )}
         </div>
 
         <div className="space-y-1">
-          <Label>Confirmar nueva contraseña</Label>
-          <Input {...register('confirmPassword')} type="password" autoComplete="new-password" />
+          <Label htmlFor="confirmPassword">Confirmar nueva contraseña</Label>
+          <Input id="confirmPassword" {...register('confirmPassword')} type="password" autoComplete="new-password" />
           {errors.confirmPassword && (
             <p className="text-xs text-destructive">{errors.confirmPassword.message}</p>
           )}

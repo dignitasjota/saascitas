@@ -147,41 +147,41 @@ function CreateUserDialog({
         <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label>Nombre</Label>
-              <Input {...register('firstName')} placeholder="Ana" />
+              <Label htmlFor="create-firstName">Nombre</Label>
+              <Input id="create-firstName" {...register('firstName')} placeholder="Ana" />
               {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
             </div>
             <div className="space-y-1">
-              <Label>Apellidos</Label>
-              <Input {...register('lastName')} placeholder="García" />
+              <Label htmlFor="create-lastName">Apellidos</Label>
+              <Input id="create-lastName" {...register('lastName')} placeholder="García" />
               {errors.lastName && <p className="text-xs text-destructive">{errors.lastName.message}</p>}
             </div>
           </div>
 
           <div className="space-y-1">
-            <Label>Email</Label>
-            <Input {...register('email')} type="email" placeholder="ana@empresa.com" />
+            <Label htmlFor="create-email">Email</Label>
+            <Input id="create-email" {...register('email')} type="email" placeholder="ana@empresa.com" />
             {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
           </div>
 
           <div className="space-y-1">
-            <Label>Contraseña</Label>
-            <Input {...register('password')} type="password" placeholder="Mínimo 8 caracteres" />
+            <Label htmlFor="create-password">Contraseña</Label>
+            <Input id="create-password" {...register('password')} type="password" placeholder="Mínimo 8 caracteres" />
             {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
           </div>
 
           <div className="space-y-1">
-            <Label>Teléfono <span className="text-muted-foreground">(opcional)</span></Label>
-            <Input {...register('phone')} type="tel" placeholder="+34 600 000 000" />
+            <Label htmlFor="create-phone">Teléfono <span className="text-muted-foreground">(opcional)</span></Label>
+            <Input id="create-phone" {...register('phone')} type="tel" placeholder="+34 600 000 000" />
           </div>
 
           <div className="space-y-1">
-            <Label>Rol</Label>
+            <Label id="create-role-label">Rol</Label>
             <Select
               value={watch('role')}
               onValueChange={(v) => setValue('role', v as CreateForm['role'])}
             >
-              <SelectTrigger>
+              <SelectTrigger aria-labelledby="create-role-label">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -260,30 +260,30 @@ function EditUserDialog({
         <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label>Nombre</Label>
-              <Input {...register('firstName')} />
+              <Label htmlFor="edit-firstName">Nombre</Label>
+              <Input id="edit-firstName" {...register('firstName')} />
               {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
             </div>
             <div className="space-y-1">
-              <Label>Apellidos</Label>
-              <Input {...register('lastName')} />
+              <Label htmlFor="edit-lastName">Apellidos</Label>
+              <Input id="edit-lastName" {...register('lastName')} />
               {errors.lastName && <p className="text-xs text-destructive">{errors.lastName.message}</p>}
             </div>
           </div>
 
           <div className="space-y-1">
-            <Label>Teléfono</Label>
-            <Input {...register('phone')} type="tel" />
+            <Label htmlFor="edit-phone">Teléfono</Label>
+            <Input id="edit-phone" {...register('phone')} type="tel" />
           </div>
 
           <div className="space-y-1">
-            <Label>Rol</Label>
+            <Label id="edit-role-label">Rol</Label>
             <Select
               value={watch('role')}
               onValueChange={(v) => setValue('role', v as EditForm['role'])}
               disabled={user.role === 'owner' || isSelf}
             >
-              <SelectTrigger>
+              <SelectTrigger aria-labelledby="edit-role-label">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

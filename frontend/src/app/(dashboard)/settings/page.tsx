@@ -194,34 +194,34 @@ function BusinessSection({ tenant }: { tenant: Tenant }) {
         <h2 className="font-semibold text-base">Información del negocio</h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <FieldRow label="Nombre del negocio *" error={errors.name?.message}>
-            <Input {...register('name')} placeholder="Electricidad García" />
+          <FieldRow label="Nombre del negocio *" htmlFor="business-name" error={errors.name?.message}>
+            <Input id="business-name" {...register('name')} placeholder="Electricidad García" />
           </FieldRow>
-          <FieldRow label="Email de contacto *" error={errors.email?.message}>
-            <Input type="email" {...register('email')} placeholder="info@miempresa.es" />
+          <FieldRow label="Email de contacto *" htmlFor="business-email" error={errors.email?.message}>
+            <Input id="business-email" type="email" {...register('email')} placeholder="info@miempresa.es" />
           </FieldRow>
-          <FieldRow label="Teléfono" error={errors.phone?.message}>
-            <Input {...register('phone')} placeholder="+34 600 000 000" />
+          <FieldRow label="Teléfono" htmlFor="business-phone" error={errors.phone?.message}>
+            <Input id="business-phone" {...register('phone')} placeholder="+34 600 000 000" />
           </FieldRow>
-          <FieldRow label="NIF / CIF" error={errors.taxId?.message}>
-            <Input {...register('taxId')} placeholder="B12345678" />
+          <FieldRow label="NIF / CIF" htmlFor="business-taxId" error={errors.taxId?.message}>
+            <Input id="business-taxId" {...register('taxId')} placeholder="B12345678" />
           </FieldRow>
         </div>
 
         <div className="space-y-1">
           <p className="text-sm font-medium text-muted-foreground">Dirección</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FieldRow label="Calle / número" error={errors.address?.message}>
-              <Input {...register('address')} placeholder="Calle Mayor 1, 2ºA" />
+            <FieldRow label="Calle / número" htmlFor="business-address" error={errors.address?.message}>
+              <Input id="business-address" {...register('address')} placeholder="Calle Mayor 1, 2ºA" />
             </FieldRow>
-            <FieldRow label="Código postal" error={errors.postalCode?.message}>
-              <Input {...register('postalCode')} placeholder="28001" />
+            <FieldRow label="Código postal" htmlFor="business-postalCode" error={errors.postalCode?.message}>
+              <Input id="business-postalCode" {...register('postalCode')} placeholder="28001" />
             </FieldRow>
-            <FieldRow label="Ciudad" error={errors.city?.message}>
-              <Input {...register('city')} placeholder="Madrid" />
+            <FieldRow label="Ciudad" htmlFor="business-city" error={errors.city?.message}>
+              <Input id="business-city" {...register('city')} placeholder="Madrid" />
             </FieldRow>
-            <FieldRow label="Provincia" error={errors.province?.message}>
-              <Input {...register('province')} placeholder="Madrid" />
+            <FieldRow label="Provincia" htmlFor="business-province" error={errors.province?.message}>
+              <Input id="business-province" {...register('province')} placeholder="Madrid" />
             </FieldRow>
           </div>
         </div>
@@ -275,17 +275,17 @@ function BookingSection({ tenant }: { tenant: Tenant }) {
       <Card className="p-6 space-y-5">
         <h2 className="font-semibold text-base">Ventana de reservas</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <FieldRow label="Antelación mínima (horas)" hint="Tiempo mínimo antes de la cita">
-            <Input type="number" min={0} max={72} {...register('minAdvanceHours')} />
+          <FieldRow label="Antelación mínima (horas)" htmlFor="booking-minAdvanceHours" hint="Tiempo mínimo antes de la cita">
+            <Input id="booking-minAdvanceHours" type="number" min={0} max={72} {...register('minAdvanceHours')} />
           </FieldRow>
-          <FieldRow label="Antelación máxima (días)" hint="Con cuánto tiempo se puede reservar">
-            <Input type="number" min={1} max={365} {...register('maxAdvanceDays')} />
+          <FieldRow label="Antelación máxima (días)" htmlFor="booking-maxAdvanceDays" hint="Con cuánto tiempo se puede reservar">
+            <Input id="booking-maxAdvanceDays" type="number" min={1} max={365} {...register('maxAdvanceDays')} />
           </FieldRow>
-          <FieldRow label="Duración de slot (minutos)" hint="Intervalo mínimo entre citas">
-            <Input type="number" min={15} max={480} step={15} {...register('slotDurationMinutes')} />
+          <FieldRow label="Duración de slot (minutos)" htmlFor="booking-slotDurationMinutes" hint="Intervalo mínimo entre citas">
+            <Input id="booking-slotDurationMinutes" type="number" min={15} max={480} step={15} {...register('slotDurationMinutes')} />
           </FieldRow>
-          <FieldRow label="Buffer entre citas (minutos)" hint="Tiempo de preparación entre citas">
-            <Input type="number" min={0} max={120} step={5} {...register('bufferMinutes')} />
+          <FieldRow label="Buffer entre citas (minutos)" htmlFor="booking-bufferMinutes" hint="Tiempo de preparación entre citas">
+            <Input id="booking-bufferMinutes" type="number" min={0} max={120} step={5} {...register('bufferMinutes')} />
           </FieldRow>
         </div>
       </Card>
@@ -441,18 +441,20 @@ function HoursSection({ employeeId, employeeName }: { employeeId: string; employ
 
 function FieldRow({
   label,
+  htmlFor,
   hint,
   error,
   children,
 }: {
   label: string
+  htmlFor?: string
   hint?: string
   error?: string
   children: React.ReactNode
 }) {
   return (
     <div className="space-y-1.5">
-      <Label>{label}</Label>
+      <Label htmlFor={htmlFor}>{label}</Label>
       {children}
       {hint && !error && <p className="text-xs text-muted-foreground">{hint}</p>}
       {error && <p className="text-xs text-destructive">{error}</p>}

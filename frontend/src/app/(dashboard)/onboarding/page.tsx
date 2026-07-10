@@ -65,25 +65,25 @@ function StepBusiness({ onNext }: { onNext: () => void }) {
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
       <div className="space-y-1.5">
-        <Label>Nombre del negocio *</Label>
-        <Input {...register('name')} placeholder="Electricidad García" />
+        <Label htmlFor="name">Nombre del negocio *</Label>
+        <Input id="name" {...register('name')} placeholder="Electricidad García" />
         {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label>Teléfono</Label>
-          <Input {...register('phone')} type="tel" placeholder="+34 600 000 000" />
+          <Label htmlFor="phone">Teléfono</Label>
+          <Input id="phone" {...register('phone')} type="tel" placeholder="+34 600 000 000" />
         </div>
         <div className="space-y-1.5">
-          <Label>Ciudad</Label>
-          <Input {...register('city')} placeholder="Madrid" />
+          <Label htmlFor="city">Ciudad</Label>
+          <Input id="city" {...register('city')} placeholder="Madrid" />
         </div>
       </div>
 
       <div className="space-y-1.5">
-        <Label>Dirección</Label>
-        <Input {...register('address')} placeholder="Calle Mayor 1, piso 2" />
+        <Label htmlFor="address">Dirección</Label>
+        <Input id="address" {...register('address')} placeholder="Calle Mayor 1, piso 2" />
       </div>
 
       <div className="flex justify-end">
@@ -175,8 +175,9 @@ function StepServices({ onNext, onBack }: { onNext: () => void; onBack: () => vo
             )}
 
             <div className="space-y-1.5">
-              <Label>Nombre del servicio</Label>
+              <Label htmlFor={`service-${idx}-name`}>Nombre del servicio</Label>
               <Input
+                id={`service-${idx}-name`}
                 value={svc.name}
                 onChange={(e) => updateService(idx, 'name', e.target.value)}
                 placeholder="Revisión eléctrica general"
@@ -185,8 +186,9 @@ function StepServices({ onNext, onBack }: { onNext: () => void; onBack: () => vo
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Duración (minutos)</Label>
+                <Label htmlFor={`service-${idx}-duration`}>Duración (minutos)</Label>
                 <Input
+                  id={`service-${idx}-duration`}
                   type="number"
                   min={15}
                   max={480}
@@ -196,8 +198,9 @@ function StepServices({ onNext, onBack }: { onNext: () => void; onBack: () => vo
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Precio (€)</Label>
+                <Label htmlFor={`service-${idx}-price`}>Precio (€)</Label>
                 <Input
+                  id={`service-${idx}-price`}
                   type="number"
                   min={0}
                   step={0.01}

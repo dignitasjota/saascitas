@@ -175,38 +175,38 @@ function NewCustomerDialog({ open, onClose }: { open: boolean; onClose: () => vo
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Nombre *</Label>
-              <Input {...register('firstName')} />
+              <Label htmlFor="firstName">Nombre *</Label>
+              <Input id="firstName" {...register('firstName')} />
               {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
             </div>
             <div className="space-y-1.5">
-              <Label>Apellido</Label>
-              <Input {...register('lastName')} />
+              <Label htmlFor="lastName">Apellido</Label>
+              <Input id="lastName" {...register('lastName')} />
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label>Teléfono *</Label>
-            <Input type="tel" {...register('phone')} />
+            <Label htmlFor="phone">Teléfono *</Label>
+            <Input id="phone" type="tel" {...register('phone')} />
             {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
           </div>
           <div className="space-y-1.5">
-            <Label>Email</Label>
-            <Input type="email" {...register('email')} />
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" type="email" {...register('email')} />
             {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Dirección</Label>
-              <Input {...register('address')} />
+              <Label htmlFor="address">Dirección</Label>
+              <Input id="address" {...register('address')} />
             </div>
             <div className="space-y-1.5">
-              <Label>Ciudad</Label>
-              <Input {...register('city')} />
+              <Label htmlFor="city">Ciudad</Label>
+              <Input id="city" {...register('city')} />
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label>Notas internas</Label>
-            <Input {...register('notes')} />
+            <Label htmlFor="notes">Notas internas</Label>
+            <Input id="notes" {...register('notes')} />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>

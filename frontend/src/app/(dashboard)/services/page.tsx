@@ -153,23 +153,23 @@ function NewServiceDialog({ open, onClose }: { open: boolean; onClose: () => voi
         <DialogHeader><DialogTitle>Nuevo servicio</DialogTitle></DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1.5">
-            <Label>Nombre *</Label>
-            <Input placeholder="Revisión eléctrica" {...register('name')} />
+            <Label htmlFor="name">Nombre *</Label>
+            <Input id="name" placeholder="Revisión eléctrica" {...register('name')} />
             {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
           </div>
           <div className="space-y-1.5">
-            <Label>Descripción</Label>
-            <Input placeholder="Descripción del servicio" {...register('description')} />
+            <Label htmlFor="description">Descripción</Label>
+            <Input id="description" placeholder="Descripción del servicio" {...register('description')} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Duración (min) *</Label>
-              <Input type="number" min={15} step={15} {...register('durationMinutes')} />
+              <Label htmlFor="durationMinutes">Duración (min) *</Label>
+              <Input id="durationMinutes" type="number" min={15} step={15} {...register('durationMinutes')} />
               {errors.durationMinutes && <p className="text-xs text-destructive">{errors.durationMinutes.message}</p>}
             </div>
             <div className="space-y-1.5">
-              <Label>Precio (€)</Label>
-              <Input type="number" min={0} step={0.01} placeholder="0.00" {...register('priceCents')} />
+              <Label htmlFor="priceCents">Precio (€)</Label>
+              <Input id="priceCents" type="number" min={0} step={0.01} placeholder="0.00" {...register('priceCents')} />
             </div>
           </div>
           <DialogFooter>
