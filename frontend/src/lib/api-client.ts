@@ -1,37 +1,26 @@
 import axios from 'axios'
 import { useAuthStore } from '@/stores/auth-store'
 
+// withCredentials sends the httpOnly auth cookies on every request. No
+// Authorization header is set — the token is not readable from JS.
 const apiClient = axios.create({
   baseURL: '/api/v1',
   headers: { 'Content-Type': 'application/json' },
-})
-
-// Attach JWT on every request
-apiClient.interceptors.request.use((config) => {
-  // Access store state directly (works outside React components)
-  const token = useAuthStore.getState().accessToken
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
+  withCredentials: true,
 })
 
 // A single in-flight refresh shared across concurrent 401s. Without this, every
-// 401 fires its own /auth/refresh with the same refresh token; since the
-// backend rotates refresh tokens single-use, all but the first are treated as
-// token reuse and revoke the whole family, logging the user out mid-session.
-let refreshPromise: Promise<string> | null = null
+// 401 fires its own /auth/refresh; since the backend rotates refresh tokens
+// single-use, all but the first are treated as token reuse and revoke the whole
+// family, logging the user out mid-session. The new tokens come back as cookies,
+// so there is nothing to store here.
+let refreshPromise: Promise<void> | null = null
 
-async function refreshAccessToken(): Promise<string> {
-  const refreshToken = useAuthStore.getState().refreshToken
-  if (!refreshToken) throw new Error('No refresh token')
-
-  const { data } = await axios.post('/api/v1/auth/refresh', { refreshToken })
-  useAuthStore.getState().setTokens(data.data.accessToken, data.data.refreshToken)
-  return data.data.accessToken
+async function refreshSession(): Promise<void> {
+  // Bare axios (not apiClient) so this doesn't recurse through the interceptor.
+  await axios.post('/api/v1/auth/refresh', {}, { withCredentials: true })
 }
 
-// Auto-refresh on 401
 apiClient.interceptors.response.use(
   (res) => res,
   async (error) => {
@@ -40,22 +29,14 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && original && !original._retry) {
       original._retry = true
 
-      if (!useAuthStore.getState().refreshToken) {
-        useAuthStore.getState().logout()
-        return Promise.reject(error)
-      }
-
       try {
-        // Reuse the shared refresh if one is already in flight.
         refreshPromise =
           refreshPromise ??
-          refreshAccessToken().finally(() => {
+          refreshSession().finally(() => {
             refreshPromise = null
           })
-        const newToken = await refreshPromise
-
-        original.headers = original.headers ?? {}
-        original.headers.Authorization = `Bearer ${newToken}`
+        await refreshPromise
+        // Retry: the browser now sends the refreshed cookie automatically.
         return apiClient(original)
       } catch {
         useAuthStore.getState().logout()

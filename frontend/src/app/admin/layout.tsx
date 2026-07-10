@@ -16,21 +16,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname()
   const router = useRouter()
   const logout = useLogout()
-  const { accessToken, user } = useAuthStore()
+  const { user } = useAuthStore()
 
   // Client-side guard: only authenticated superadmins may see the admin panel.
   // (The backend enforces this too; this stops non-admins from rendering the
-  // broken shell. A server-side middleware needs the token in a cookie — see
-  // the localStorage→httpOnly migration.)
+  // broken shell.)
   useEffect(() => {
-    if (!accessToken) {
+    if (!user) {
       router.replace('/login')
-    } else if (user && user.role !== 'superadmin') {
+    } else if (user.role !== 'superadmin') {
       router.replace('/dashboard')
     }
-  }, [accessToken, user, router])
+  }, [user, router])
 
-  if (!accessToken || (user && user.role !== 'superadmin')) return null
+  if (!user || user.role !== 'superadmin') return null
 
   return (
     <div className="min-h-screen flex bg-gray-950 text-gray-100">

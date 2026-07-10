@@ -63,7 +63,7 @@ interface ProfileData {
 }
 
 function ProfileSection({ profile }: { profile: ProfileData }) {
-  const { user, setAuth, tenant, accessToken, refreshToken } = useAuthStore()
+  const { user, setAuth, tenant } = useAuthStore()
   const queryClient = useQueryClient()
 
   const {
@@ -86,12 +86,10 @@ function ProfileSection({ profile }: { profile: ProfileData }) {
     onSuccess: (res) => {
       const updated = res.data.data
       // Update auth store so sidebar name reflects changes
-      if (user && tenant && accessToken && refreshToken) {
+      if (user && tenant) {
         setAuth(
           { ...user, firstName: updated.firstName, lastName: updated.lastName },
           tenant,
-          accessToken,
-          refreshToken,
         )
       }
       queryClient.setQueryData(['profile'], updated)

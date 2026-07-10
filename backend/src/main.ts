@@ -3,6 +3,11 @@ import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 
+// cookie-parser is a CommonJS module (module.exports = fn) with no default
+// export, so an ESM default import resolves to undefined at runtime.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import cookieParser = require('cookie-parser');
+
 // BigInt JSON serialization (Prisma BigInt fields)
 (BigInt.prototype as any).toJSON = function () {
   return Number(this);
@@ -13,6 +18,7 @@ async function bootstrap() {
 
   // Security
   app.use(helmet());
+  app.use(cookieParser());
   app.enableCors({
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,

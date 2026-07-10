@@ -30,7 +30,7 @@ export function useRegister() {
       return res.data.data
     },
     onSuccess: (data) => {
-      setAuth(data.user, data.tenant, data.accessToken, data.refreshToken)
+      setAuth(data.user, data.tenant)
       // Send new users to onboarding wizard
       router.push('/onboarding')
     },
@@ -51,7 +51,7 @@ export function useLogin() {
       return res.data.data
     },
     onSuccess: (data) => {
-      setAuth(data.user, data.tenant, data.accessToken, data.refreshToken)
+      setAuth(data.user, data.tenant)
       router.push(data.user.role === 'superadmin' ? '/admin' : '/dashboard')
     },
     onError: (error: any) => {
@@ -62,18 +62,16 @@ export function useLogin() {
 }
 
 export function useLogout() {
-  const { refreshToken, logout } = useAuthStore()
-  const router = useRouter()
+  const { logout } = useAuthStore()
 
   return useMutation({
     mutationFn: async () => {
-      if (refreshToken) {
-        await apiClient.post('/auth/logout', { refreshToken }).catch(() => {})
-      }
+      // Revokes the refresh token and clears the auth cookies on the server.
+      await apiClient.post('/auth/logout').catch(() => {})
     },
     onSettled: () => {
+      // Clears local identity and redirects to /login.
       logout()
-      router.push('/login')
     },
   })
 }
