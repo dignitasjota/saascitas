@@ -4,13 +4,13 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: saascitas
-      POSTGRES_USER: saascitas
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: db_rutapro
+      POSTGRES_USER: u_rutapro
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U saascitas"]
+      test: ["CMD-SHELL", "pg_isready -U u_rutapro"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -20,7 +20,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required} --appendonly yes
     volumes:
       - redisdata:/data
     healthcheck:
@@ -42,11 +42,11 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://saascitas:${POSTGRES_PASSWORD}@postgres:5432/saascitas
+      DATABASE_URL: postgresql://u_rutapro:${POSTGRES_PASSWORD}@postgres:5432/db_rutapro
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_EXPIRES_IN: 15m
       JWT_REFRESH_EXPIRES_IN: 30d
       FRONTEND_URL: ${FRONTEND_URL}
@@ -62,7 +62,7 @@ services:
       STRIPE_PRICE_PROFESSIONAL: ${STRIPE_PRICE_PROFESSIONAL}
       STRIPE_PRICE_BUSINESS: ${STRIPE_PRICE_BUSINESS}
     command: >
-      sh -c "npx prisma migrate deploy && node dist/main"
+      sh -c "npx prisma migrate deploy && node dist/src/main"
     networks:
       - internal
       - public
@@ -72,7 +72,8 @@ services:
     image: ghcr.io/${GITHUB_REPOSITORY}/frontend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       BACKEND_URL: http://backend:3001
@@ -93,8 +94,10 @@ services:
       - ./nginx/certs:/etc/nginx/certs:ro
       - certbot_www:/var/www/certbot:ro
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
     networks:
       - public
 
