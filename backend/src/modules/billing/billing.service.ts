@@ -26,8 +26,16 @@ export class BillingService {
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
   ) {
+    // Stripe throws if constructed with an empty key, which would crash app
+    // startup when billing isn't configured. Fall back to a placeholder and
+    // warn; any real Stripe call will then fail with a clear auth error.
     const secretKey = this.config.get<string>('STRIPE_SECRET_KEY', '');
-    this.stripe = new Stripe(secretKey, { apiVersion: '2026-02-25.clover' });
+    if (!secretKey) {
+      this.logger.warn('STRIPE_SECRET_KEY is not set — billing is not configured');
+    }
+    this.stripe = new Stripe(secretKey || 'sk_not_configured', {
+      apiVersion: '2026-02-25.clover',
+    });
   }
 
   /**

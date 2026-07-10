@@ -4,11 +4,14 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { Response } from 'express';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
+  private readonly logger = new Logger(AllExceptionsFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
@@ -29,9 +32,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
         details = resp.errors || undefined;
       }
     } else if (exception instanceof Error) {
-      message = exception.message;
-      // Don't leak stack traces in production
+      // Unexpected (500). Always log server-side for diagnosis, but never leak
+      // the internal message (Prisma/DB details, etc.) to clients in production.
+      this.logger.error(exception.message, exception.stack);
       if (process.env.NODE_ENV === 'development') {
+        message = exception.message;
         details = exception.stack;
       }
     }
