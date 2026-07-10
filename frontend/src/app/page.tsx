@@ -134,7 +134,10 @@ export default function LandingPage() {
                 )}
                 <h3 className={`text-xl font-bold mb-1 ${p.highlight ? 'text-white' : ''}`}>{p.name}</h3>
                 <p className={`text-4xl font-extrabold mt-2 mb-1 ${p.highlight ? 'text-white' : 'text-gray-900'}`}>
-                  {p.price}<span className={`text-base font-normal ${p.highlight ? 'text-blue-200' : 'text-gray-400'}`}>/mes</span>
+                  {p.price}
+                  {p.price !== 'Gratis' && (
+                    <span className={`text-base font-normal ${p.highlight ? 'text-blue-200' : 'text-gray-400'}`}>/mes</span>
+                  )}
                 </p>
                 <p className={`text-sm mb-6 ${p.highlight ? 'text-blue-100' : 'text-gray-500'}`}>{p.desc}</p>
                 <ul className="space-y-2.5 mb-8 flex-1">
@@ -259,7 +262,7 @@ const features = [
 const plans = [
   {
     name: 'Básico',
-    price: '19€',
+    price: 'Gratis',
     desc: 'Para autónomos que empiezan',
     highlight: false,
     features: [
@@ -272,7 +275,7 @@ const plans = [
   },
   {
     name: 'Profesional',
-    price: '49€',
+    price: '29€',
     desc: 'Para equipos en crecimiento',
     highlight: true,
     features: [
@@ -286,7 +289,7 @@ const plans = [
   },
   {
     name: 'Business',
-    price: '99€',
+    price: '79€',
     desc: 'Para negocios grandes',
     highlight: false,
     features: [

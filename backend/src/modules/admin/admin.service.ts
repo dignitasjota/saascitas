@@ -29,11 +29,12 @@ export class AdminService {
       }),
     ]);
 
-    // Estimated MRR (cents)
+    // Estimated MRR (cents). Must match the billing plan prices (0/29/79 €);
+    // the free basic plan contributes 0.
     const planPrices: Record<string, number> = {
-      basic: 1900,
-      professional: 4900,
-      business: 9900,
+      basic: 0,
+      professional: 2900,
+      business: 7900,
     };
 
     const activePlanCounts = await this.prisma.tenant.groupBy({
