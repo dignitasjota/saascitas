@@ -5,7 +5,10 @@ import { Plus, Search, Phone, Mail, CalendarDays, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { toast } from 'sonner'
 import { useCustomers, useCreateCustomer } from '@/hooks/use-customers'
+import { useDebounce } from '@/hooks/use-debounce'
+import { ErrorState } from '@/components/ui/error-state'
 import { formatDate, formatPrice } from '@/lib/utils'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -31,13 +34,16 @@ export default function CustomersPage() {
   const [search, setSearch] = useState('')
   const [showNew, setShowNew] = useState(false)
   const [exporting, setExporting] = useState(false)
-  const { data, isLoading } = useCustomers(search || undefined)
+  const debouncedSearch = useDebounce(search)
+  const { data, isLoading, isError, refetch } = useCustomers(debouncedSearch || undefined)
   const customers = data?.data ?? []
 
   const handleExport = async () => {
     setExporting(true)
     try {
       await downloadCsv('/customers/export', `clientes_${new Date().toISOString().split('T')[0]}.csv`)
+    } catch {
+      toast.error('No se pudo exportar el CSV')
     } finally {
       setExporting(false)
     }
@@ -91,7 +97,18 @@ export default function CustomersPage() {
               </tr>
             ))}
 
-            {!isLoading && customers.length === 0 && (
+            {isError && (
+              <tr>
+                <td colSpan={6} className="px-4 py-3">
+                  <ErrorState
+                    message="No se pudieron cargar los clientes"
+                    onRetry={() => refetch()}
+                  />
+                </td>
+              </tr>
+            )}
+
+            {!isLoading && !isError && customers.length === 0 && (
               <tr>
                 <td colSpan={6} className="text-center text-muted-foreground py-12">
                   {search ? 'Sin resultados' : 'No hay clientes todavía'}

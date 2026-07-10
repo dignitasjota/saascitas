@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
+import { toast } from 'sonner'
 import {
   CheckCircle2,
   XCircle,
@@ -253,6 +254,8 @@ export default function BillingPage() {
     try {
       const res = await apiClient.post('/billing/portal')
       window.location.href = res.data.data.url
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'No se pudo abrir el portal de facturación')
     } finally {
       setPortalLoading(false)
     }

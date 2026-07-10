@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AppointmentCard } from '@/components/appointments/appointment-card'
 import { NewAppointmentDialog } from '@/components/appointments/new-appointment-dialog'
+import { ErrorState } from '@/components/ui/error-state'
 import { useToday } from '@/hooks/use-appointments'
 import { useAuthStore } from '@/stores/auth-store'
 import { useTenantTimezone } from '@/hooks/use-tenant'
@@ -20,7 +21,7 @@ export default function DashboardPage() {
   const { user } = useAuthStore()
   const tz = useTenantTimezone()
   const today = todayInTimezone(tz)
-  const { data: appointments = [], isLoading } = useToday()
+  const { data: appointments = [], isLoading, isError, refetch } = useToday()
 
   // Show onboarding banner if no services yet
   const { data: services } = useQuery({
@@ -90,7 +91,11 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {!isLoading && appointments.length === 0 && (
+        {isError && (
+          <ErrorState message="No se pudo cargar la agenda de hoy" onRetry={() => refetch()} />
+        )}
+
+        {!isLoading && !isError && appointments.length === 0 && (
           <div className="rounded-lg border border-dashed p-10 text-center">
             <CalendarDays className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
             <p className="text-sm font-medium">No hay citas para hoy</p>

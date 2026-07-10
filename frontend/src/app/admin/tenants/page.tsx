@@ -6,6 +6,7 @@ import { Search, ChevronRight, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import apiClient from '@/lib/api-client'
 import { formatDate } from '@/lib/utils'
+import { useDebounce } from '@/hooks/use-debounce'
 
 interface Tenant {
   id: string
@@ -38,15 +39,16 @@ export default function AdminTenantsPage() {
   const [planFilter, setPlanFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const debouncedSearch = useDebounce(search)
 
   const qc = useQueryClient()
 
   const { data, isLoading } = useQuery({
-    queryKey: ['admin-tenants', search, planFilter, statusFilter],
+    queryKey: ['admin-tenants', debouncedSearch, planFilter, statusFilter],
     queryFn: async () => {
       const res = await apiClient.get('/admin/tenants', {
         params: {
-          search: search || undefined,
+          search: debouncedSearch || undefined,
           plan: planFilter || undefined,
           status: statusFilter || undefined,
           limit: 50,
@@ -76,6 +78,9 @@ export default function AdminTenantsPage() {
       qc.invalidateQueries({ queryKey: ['admin-stats'] })
       toast.success('Tenant actualizado')
     },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.detail || 'Error al actualizar el tenant')
+    },
   })
 
   const suspend = useMutation({
@@ -86,6 +91,9 @@ export default function AdminTenantsPage() {
       qc.invalidateQueries({ queryKey: ['admin-tenants'] })
       qc.invalidateQueries({ queryKey: ['admin-tenant', selectedId] })
       toast.success('Tenant suspendido')
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.detail || 'Error al suspender el tenant')
     },
   })
 

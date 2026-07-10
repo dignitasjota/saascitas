@@ -100,7 +100,16 @@ export default function ServicesPage() {
                       variant="ghost"
                       size="icon"
                       className="text-muted-foreground hover:text-destructive"
-                      onClick={() => deleteService.mutate(s.id)}
+                      disabled={deleteService.isPending}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `¿Eliminar el servicio "${s.name}"? Esta acción no se puede deshacer.`,
+                          )
+                        ) {
+                          deleteService.mutate(s.id)
+                        }
+                      }}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>

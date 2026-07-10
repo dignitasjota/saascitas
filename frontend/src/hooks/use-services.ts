@@ -59,5 +59,8 @@ export function useDeleteService() {
       qc.invalidateQueries({ queryKey: ['services'] })
       toast.success('Servicio eliminado')
     },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.detail || 'Error al eliminar el servicio')
+    },
   })
 }
