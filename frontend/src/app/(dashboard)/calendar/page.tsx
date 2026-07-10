@@ -21,9 +21,10 @@ import {
 import { formatTime, formatPrice } from '@/lib/utils'
 import type { Appointment } from '@/types/api'
 
-const HOUR_START = 7
-const HOUR_END = 21
-const HOURS = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => i + HOUR_START)
+// Default visible window; the grid expands beyond it if any appointment falls
+// earlier or later, so nothing gets clamped or clipped.
+const DEFAULT_START = 7
+const DEFAULT_END = 21
 
 export default function CalendarPage() {
   const [weekStart, setWeekStart] = useState(() =>
@@ -52,6 +53,25 @@ export default function CalendarPage() {
       map[key].push(appt)
     }
     return map
+  }, [appointments])
+
+  // Expand the hour range to fit every appointment (early-morning or late-night
+  // bookings no longer get clamped to the 7–21 default or clipped off the grid).
+  const { hourStart, hours } = useMemo(() => {
+    let start = DEFAULT_START
+    let end = DEFAULT_END
+    for (const appt of appointments) {
+      const s = parseISO(appt.startsAt)
+      const e = parseISO(appt.endsAt)
+      const startH = s.getHours()
+      const endH = e.getHours() + (e.getMinutes() > 0 || e.getSeconds() > 0 ? 1 : 0)
+      if (startH < start) start = startH
+      if (endH > end) end = Math.min(24, endH)
+    }
+    return {
+      hourStart: start,
+      hours: Array.from({ length: end - start }, (_, i) => i + start),
+    }
   }, [appointments])
 
   const goToToday = () => setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))
@@ -140,7 +160,7 @@ export default function CalendarPage() {
           <div className="grid grid-cols-8">
             {/* Hours column */}
             <div className="border-r">
-              {HOURS.map(h => (
+              {hours.map(h => (
                 <div key={h} className="h-16 border-b flex items-start pt-1 px-2">
                   <span className="text-xs text-muted-foreground tabular-nums">{h}:00</span>
                 </div>
@@ -161,7 +181,7 @@ export default function CalendarPage() {
                 >
                   {/* Empty hour cells are buttons so a new appointment can be
                       created by mouse or keyboard. */}
-                  {HOURS.map(h => (
+                  {hours.map(h => (
                     <button
                       key={h}
                       type="button"
@@ -177,7 +197,7 @@ export default function CalendarPage() {
                     const end = parseISO(appt.endsAt)
                     const startH = start.getHours() + start.getMinutes() / 60
                     const endH = end.getHours() + end.getMinutes() / 60
-                    const top = Math.max(0, (startH - HOUR_START) * 64)
+                    const top = Math.max(0, (startH - hourStart) * 64)
                     const height = Math.max(24, (endH - startH) * 64 - 2)
                     const name = `${appt.customer?.firstName ?? ''} ${appt.customer?.lastName ?? ''}`.trim()
 
