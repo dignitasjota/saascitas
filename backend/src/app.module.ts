@@ -7,6 +7,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+import { HealthController } from './health.controller';
 import { AuthModule } from './modules/auth/auth.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
 import { UsersModule } from './modules/users/users.module';
@@ -43,6 +44,7 @@ import { AdminModule } from './modules/admin/admin.module';
     BillingModule,
     AdminModule,
   ],
+  controllers: [HealthController],
   providers: [
     // Rate limit guard (global)
     { provide: APP_GUARD, useClass: ThrottlerGuard },
