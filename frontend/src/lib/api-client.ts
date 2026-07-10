@@ -16,25 +16,46 @@ apiClient.interceptors.request.use((config) => {
   return config
 })
 
+// A single in-flight refresh shared across concurrent 401s. Without this, every
+// 401 fires its own /auth/refresh with the same refresh token; since the
+// backend rotates refresh tokens single-use, all but the first are treated as
+// token reuse and revoke the whole family, logging the user out mid-session.
+let refreshPromise: Promise<string> | null = null
+
+async function refreshAccessToken(): Promise<string> {
+  const refreshToken = useAuthStore.getState().refreshToken
+  if (!refreshToken) throw new Error('No refresh token')
+
+  const { data } = await axios.post('/api/v1/auth/refresh', { refreshToken })
+  useAuthStore.getState().setTokens(data.data.accessToken, data.data.refreshToken)
+  return data.data.accessToken
+}
+
 // Auto-refresh on 401
 apiClient.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config
 
-    if (error.response?.status === 401 && !original._retry) {
+    if (error.response?.status === 401 && original && !original._retry) {
       original._retry = true
 
-      const refreshToken = useAuthStore.getState().refreshToken
-      if (!refreshToken) {
+      if (!useAuthStore.getState().refreshToken) {
         useAuthStore.getState().logout()
         return Promise.reject(error)
       }
 
       try {
-        const { data } = await axios.post('/api/v1/auth/refresh', { refreshToken })
-        useAuthStore.getState().setTokens(data.data.accessToken, data.data.refreshToken)
-        original.headers.Authorization = `Bearer ${data.data.accessToken}`
+        // Reuse the shared refresh if one is already in flight.
+        refreshPromise =
+          refreshPromise ??
+          refreshAccessToken().finally(() => {
+            refreshPromise = null
+          })
+        const newToken = await refreshPromise
+
+        original.headers = original.headers ?? {}
+        original.headers.Authorization = `Bearer ${newToken}`
         return apiClient(original)
       } catch {
         useAuthStore.getState().logout()

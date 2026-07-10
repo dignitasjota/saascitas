@@ -69,7 +69,7 @@ function ProfileSection({ profile }: { profile: ProfileData }) {
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting, isDirty },
+    formState: { errors, isDirty },
     reset,
   } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
@@ -151,8 +151,8 @@ function ProfileSection({ profile }: { profile: ProfileData }) {
           Email: {profile.email} — no se puede cambiar desde aquí
         </div>
 
-        <Button type="submit" disabled={isSubmitting || !isDirty}>
-          {isSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+        <Button type="submit" disabled={mutation.isPending || !isDirty}>
+          {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
           Guardar cambios
         </Button>
       </form>
@@ -166,7 +166,7 @@ function PasswordSection() {
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting },
+    formState: { errors },
     reset,
   } = useForm<PasswordForm>({
     resolver: zodResolver(passwordSchema),
@@ -224,8 +224,8 @@ function PasswordSection() {
           )}
         </div>
 
-        <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+        <Button type="submit" disabled={mutation.isPending}>
+          {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
           Cambiar contraseña
         </Button>
       </form>

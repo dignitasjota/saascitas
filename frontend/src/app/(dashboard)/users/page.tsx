@@ -115,7 +115,7 @@ function CreateUserDialog({
     setValue,
     watch,
     reset,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
     defaultValues: { role: 'technician' },
@@ -194,8 +194,8 @@ function CreateUserDialog({
             <Button type="button" variant="outline" onClick={onClose}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            <Button type="submit" disabled={mutation.isPending}>
+              {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Crear usuario
             </Button>
           </DialogFooter>
@@ -224,7 +224,7 @@ function EditUserDialog({
     handleSubmit,
     setValue,
     watch,
-    formState: { errors, isSubmitting, isDirty },
+    formState: { errors, isDirty },
   } = useForm<EditForm>({
     resolver: zodResolver(editSchema),
     defaultValues: {
@@ -304,8 +304,8 @@ function EditUserDialog({
             <Button type="button" variant="outline" onClick={onClose}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={isSubmitting || !isDirty}>
-              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            <Button type="submit" disabled={mutation.isPending || !isDirty}>
+              {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Guardar
             </Button>
           </DialogFooter>

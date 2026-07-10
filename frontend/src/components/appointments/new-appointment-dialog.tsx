@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -54,6 +54,24 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
       employeeId: defaultEmployeeId ?? '',
     },
   })
+
+  // The dialog stays mounted, so defaultValues (evaluated once) go stale. Re-seed
+  // the form each time it opens or the defaults change (e.g. clicking a calendar
+  // cell), otherwise the appointment is created on today's date, not the picked one.
+  useEffect(() => {
+    if (open) {
+      reset({
+        date: defaultDate ?? new Date().toISOString().split('T')[0],
+        employeeId: defaultEmployeeId ?? '',
+        customerId: '',
+        serviceId: undefined,
+        slot: '',
+        address: '',
+        city: '',
+        notes: '',
+      })
+    }
+  }, [open, defaultDate, defaultEmployeeId, reset])
 
   const watchedEmployeeId = watch('employeeId')
   const watchedServiceId = watch('serviceId')
