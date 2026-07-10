@@ -6,16 +6,16 @@ import {
   IsString,
   IsUUID,
   MaxLength,
-  MinLength,
 } from 'class-validator';
 import { UserRole } from '@prisma/client';
+import { IsStrongPassword } from '../../../common/validators/strong-password.decorator';
 
 export class CreateUserDto {
   @IsEmail()
   email: string;
 
   @IsString()
-  @MinLength(8)
+  @IsStrongPassword()
   @MaxLength(100)
   password: string;
 
