@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -324,11 +324,16 @@ function HoursSection({ employeeId, employeeName }: { employeeId: string; employ
     ),
   )
 
-  // Sync fetched data into state
+  // Seed the local state from the server ONCE per employee. Re-seeding on every
+  // `hours` change would clobber unsaved edits when a background refetch (window
+  // focus, cache invalidation) fires while the user is editing.
+  const seededFor = useRef<string | null>(null)
   useEffect(() => {
     if (!hours) return
-    setSchedule((prev) => {
-      const next = { ...prev }
+    if (seededFor.current === employeeId) return
+    seededFor.current = employeeId
+    setSchedule(() => {
+      const next: Record<string, DaySchedule> = {}
       for (const d of DAYS) {
         const h = hours.find((x) => x.dayOfWeek === d.key)
         next[d.key] = h
@@ -337,7 +342,7 @@ function HoursSection({ employeeId, employeeName }: { employeeId: string; employ
       }
       return next
     })
-  }, [hours])
+  }, [hours, employeeId])
 
   const mutation = useMutation({
     mutationFn: async () => {
