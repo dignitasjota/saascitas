@@ -163,7 +163,7 @@ export default function LandingPage() {
           </div>
           <p className="text-center text-sm text-gray-500 mt-10">
             ¿Más de 20 empleados?{' '}
-            <a href="mailto:soporte@saascitas.com?subject=Plan a medida" className="font-medium text-blue-600 hover:underline">
+            <a href="mailto:info@rutapro.es?subject=Plan a medida" className="font-medium text-blue-600 hover:underline">
               Contacta con nosotros
             </a>{' '}
             y te preparamos un plan a medida.
@@ -213,7 +213,7 @@ export default function LandingPage() {
           <div className="flex gap-6">
             <a href="#" className="hover:text-gray-900 transition-colors">Privacidad</a>
             <a href="#" className="hover:text-gray-900 transition-colors">Términos</a>
-            <a href="mailto:soporte@saascitas.com" className="hover:text-gray-900 transition-colors">Soporte</a>
+            <a href="mailto:info@rutapro.es" className="hover:text-gray-900 transition-colors">Soporte</a>
           </div>
         </div>
       </footer>

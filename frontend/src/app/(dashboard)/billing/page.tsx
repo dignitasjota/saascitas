@@ -41,7 +41,7 @@ interface BillingStatus {
   monthlyAppointments?: { month: string; used: number; limit: number | null }
 }
 
-const SALES_EMAIL = 'soporte@saascitas.com'
+const SALES_EMAIL = 'info@rutapro.es'
 
 // ─── Plan definitions ────────────────────────────────────────────────────────
 
