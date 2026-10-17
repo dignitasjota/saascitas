@@ -62,7 +62,7 @@ export class AppointmentsService {
       where.status = options.status;
     }
 
-    const limit = options.limit || 50;
+    const limit = Math.min(Math.max(options.limit || 50, 1), 100);
 
     const appointments = await this.prisma.appointment.findMany({
       where,

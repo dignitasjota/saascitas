@@ -8,6 +8,7 @@ import {
   Body,
   Param,
   Query,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { EmployeesService } from './employees.service';
 import { CreateEmployeeDto, UpdateEmployeeDto } from './dto/create-employee.dto';
@@ -15,6 +16,7 @@ import {
   SetWorkingHoursDto,
   CreateScheduleExceptionDto,
   SetEmployeeServicesDto,
+  ExceptionsQueryDto,
 } from './dto/working-hours.dto';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -33,7 +35,7 @@ export class EmployeesController {
   @Get(':id')
   async findOne(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const employee = await this.employeesService.findById(user.tid, id);
     return { data: employee };
@@ -53,7 +55,7 @@ export class EmployeesController {
   @Roles(UserRole.owner, UserRole.admin)
   async update(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateEmployeeDto,
   ) {
     const employee = await this.employeesService.update(user.tid, id, dto);
@@ -64,7 +66,7 @@ export class EmployeesController {
   @Roles(UserRole.owner, UserRole.admin)
   async remove(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     await this.employeesService.remove(user.tid, id);
     return { data: { message: 'Employee deactivated' } };
@@ -78,7 +80,7 @@ export class EmployeesController {
   @Roles(UserRole.owner, UserRole.admin)
   async setServices(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SetEmployeeServicesDto,
   ) {
     const data = await this.employeesService.setServices(user.tid, id, dto.serviceIds);
@@ -92,7 +94,7 @@ export class EmployeesController {
   @Get(':id/schedule')
   async getSchedule(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const hours = await this.employeesService.getWorkingHours(user.tid, id);
     return { data: hours };
@@ -102,7 +104,7 @@ export class EmployeesController {
   @Roles(UserRole.owner, UserRole.admin)
   async setSchedule(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SetWorkingHoursDto,
   ) {
     const hours = await this.employeesService.setWorkingHours(
@@ -120,9 +122,8 @@ export class EmployeesController {
   @Get(':id/exceptions')
   async getExceptions(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() { from, to }: ExceptionsQueryDto,
   ) {
     const exceptions = await this.employeesService.getScheduleExceptions(
       user.tid,
@@ -137,7 +138,7 @@ export class EmployeesController {
   @Roles(UserRole.owner, UserRole.admin)
   async createException(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CreateScheduleExceptionDto,
   ) {
     const exception = await this.employeesService.createScheduleException(
@@ -152,8 +153,8 @@ export class EmployeesController {
   @Roles(UserRole.owner, UserRole.admin)
   async deleteException(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
-    @Param('exceptionId') exceptionId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('exceptionId', ParseUUIDPipe) exceptionId: string,
   ) {
     await this.employeesService.deleteScheduleException(
       user.tid,

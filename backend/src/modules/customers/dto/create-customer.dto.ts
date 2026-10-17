@@ -6,6 +6,7 @@ import {
   MaxLength,
   IsArray,
 } from 'class-validator';
+import { PaginationDto } from '../../../common/dto/pagination.dto';
 
 export class CreateCustomerDto {
   @IsString()
@@ -96,4 +97,11 @@ export class UpdateCustomerDto {
   @IsArray()
   @IsString({ each: true })
   tags?: string[];
+}
+
+export class ListCustomersQueryDto extends PaginationDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  search?: string;
 }

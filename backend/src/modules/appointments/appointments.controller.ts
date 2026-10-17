@@ -7,15 +7,25 @@ import {
   Body,
   Query,
   Res,
+  ParseUUIDPipe,
+  BadRequestException,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { AppointmentsService } from './appointments.service';
 import { AvailabilityService } from './availability.service';
 import {
+  AvailabilityQueryDto,
+  CalendarQueryDto,
   CreateAppointmentDto,
+  ExportQueryDto,
+  ListAppointmentsQueryDto,
   UpdateAppointmentDto,
   UpdateStatusDto,
 } from './dto/create-appointment.dto';
+
+// The calendar endpoint is open to every staff role and returns customer
+// phones, so its window is bounded (bulk access goes through the export).
+const MAX_CALENDAR_RANGE_MS = 93 * 24 * 60 * 60 * 1000;
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 
@@ -32,30 +42,22 @@ export class AppointmentsController {
   @Get()
   async findAll(
     @CurrentUser() user: JwtPayload,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-    @Query('employeeId') employeeId?: string,
-    @Query('status') status?: string,
-    @Query('limit') limit?: number,
-    @Query('cursor') cursor?: string,
+    @Query() query: ListAppointmentsQueryDto,
   ) {
-    return this.appointmentsService.findAll(user.tid, {
-      from,
-      to,
-      employeeId,
-      status,
-      limit,
-      cursor,
-    });
+    return this.appointmentsService.findAll(user.tid, query);
   }
 
   @Get('calendar')
   async getCalendar(
     @CurrentUser() user: JwtPayload,
-    @Query('from') from: string,
-    @Query('to') to: string,
-    @Query('employeeId') employeeId?: string,
+    @Query() { from, to, employeeId }: CalendarQueryDto,
   ) {
+    const span = new Date(to).getTime() - new Date(from).getTime();
+    if (span < 0 || span > MAX_CALENDAR_RANGE_MS) {
+      throw new BadRequestException(
+        '"to" must be after "from" and the range at most 93 days',
+      );
+    }
     const data = await this.appointmentsService.getCalendar(
       user.tid,
       from,
@@ -68,7 +70,7 @@ export class AppointmentsController {
   @Get('today')
   async getToday(
     @CurrentUser() user: JwtPayload,
-    @Query('employeeId') employeeId?: string,
+    @Query('employeeId', new ParseUUIDPipe({ optional: true })) employeeId?: string,
   ) {
     const data = await this.appointmentsService.getToday(user.tid, employeeId);
     return { data };
@@ -78,8 +80,7 @@ export class AppointmentsController {
   @Get('export')
   async exportCsv(
     @CurrentUser() user: JwtPayload,
-    @Query('from') from: string,
-    @Query('to') to: string,
+    @Query() { from, to }: ExportQueryDto,
     @Res() res: Response,
   ) {
     const csv = await this.appointmentsService.exportCsv(user.tid, from, to);
@@ -92,9 +93,7 @@ export class AppointmentsController {
   @Get('availability')
   async getAvailability(
     @CurrentUser() user: JwtPayload,
-    @Query('employeeId') employeeId: string,
-    @Query('date') date: string,
-    @Query('duration') duration: number,
+    @Query() { employeeId, date, duration }: AvailabilityQueryDto,
   ) {
     const slots = await this.availabilityService.getAvailableSlots(
       user.tid,
@@ -108,7 +107,7 @@ export class AppointmentsController {
   @Get(':id')
   async findOne(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const appointment = await this.appointmentsService.findById(user.tid, id);
     return { data: appointment };
@@ -126,7 +125,7 @@ export class AppointmentsController {
   @Patch(':id')
   async update(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAppointmentDto,
   ) {
     const appointment = await this.appointmentsService.update(
@@ -140,7 +139,7 @@ export class AppointmentsController {
   @Patch(':id/status')
   async updateStatus(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateStatusDto,
   ) {
     const appointment = await this.appointmentsService.updateStatus(

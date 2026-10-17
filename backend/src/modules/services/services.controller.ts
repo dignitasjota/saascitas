@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { ServicesService } from './services.service';
 import { CreateServiceDto, UpdateServiceDto } from './dto/create-service.dto';
@@ -26,7 +27,7 @@ export class ServicesController {
   @Get(':id')
   async findOne(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const service = await this.servicesService.findById(user.tid, id);
     return { data: service };
@@ -46,7 +47,7 @@ export class ServicesController {
   @Roles(UserRole.owner, UserRole.admin)
   async update(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateServiceDto,
   ) {
     const service = await this.servicesService.update(user.tid, id, dto);
@@ -57,7 +58,7 @@ export class ServicesController {
   @Roles(UserRole.owner, UserRole.admin)
   async remove(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     await this.servicesService.remove(user.tid, id);
     return { data: { message: 'Service deactivated' } };
