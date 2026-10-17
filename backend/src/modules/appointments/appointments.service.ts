@@ -305,7 +305,19 @@ export class AppointmentsService {
     //  - cancelling undoes the +1 added at creation
     //  - completing adds the appointment price to the customer's total spent
     const updated = await this.prisma.$transaction(async (tx) => {
-      const appt = await tx.appointment.update({ where: { id }, data: updateData });
+      // Compare-and-set on the status we validated: a concurrent change (e.g.
+      // the customer cancelling from the email link at the same moment) must
+      // not apply twice and double-count the customer stats.
+      const claim = await tx.appointment.updateMany({
+        where: { id, tenantId, status: existing.status },
+        data: updateData,
+      });
+      if (claim.count === 0) {
+        throw new ConflictException(
+          'The appointment status changed meanwhile. Reload and try again.',
+        );
+      }
+      const appt = await tx.appointment.findUniqueOrThrow({ where: { id } });
 
       if (dto.status === 'cancelled') {
         await tx.customer.update({

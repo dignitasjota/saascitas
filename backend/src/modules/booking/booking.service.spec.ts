@@ -412,9 +412,27 @@ describe('BookingService', () => {
       usedAt: null,
       expiresAt: new Date(Date.now() + 3600 * 1000),
       appointmentId: 'appt-1',
-      appointment: { id: 'appt-1', status: 'pending' },
+      appointment: {
+        id: 'appt-1',
+        status: 'pending',
+        customerId: 'cust-1',
+        startsAt: new Date(Date.now() + 24 * 3600 * 1000),
+      },
       ...overrides,
     });
+
+    // Interactive transaction whose updateMany calls report `counts` in order.
+    const runTx = (counts: number[]) => {
+      const tx = {
+        bookingToken: { updateMany: jest.fn() },
+        appointment: { updateMany: jest.fn() },
+        customer: { update: jest.fn().mockResolvedValue({}) },
+      };
+      tx.bookingToken.updateMany.mockResolvedValue({ count: counts[0] });
+      tx.appointment.updateMany.mockResolvedValue({ count: counts[1] });
+      mockPrisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      return tx;
+    };
 
     it('throws NotFoundException for invalid token', async () => {
       mockPrisma.bookingToken.findFirst.mockResolvedValue(null);
@@ -444,16 +462,76 @@ describe('BookingService', () => {
 
     it('cancels appointment and removes reminder on valid token', async () => {
       mockPrisma.bookingToken.findFirst.mockResolvedValue(mockCancelRecord());
-      mockPrisma.$transaction.mockResolvedValue([{}, {}]);
+      const tx = runTx([1, 1]);
 
       const result = await service.cancelBooking(TOKEN, 'No puedo');
 
-      expect(mockPrisma.$transaction).toHaveBeenCalled();
+      expect(tx.appointment.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'appt-1', status: 'pending' } }),
+      );
+      expect(tx.customer.update).toHaveBeenCalledWith({
+        where: { id: 'cust-1' },
+        data: { totalAppointments: { decrement: 1 } },
+      });
 
       // Allow microtasks to settle
       await new Promise((r) => setImmediate(r));
       expect(mockNotifications.cancelReminder).toHaveBeenCalledWith('appt-1');
       expect(result.message).toContain('cancelled');
+    });
+  });
+
+  describe('cancelBooking (races and limits)', () => {
+    const record = (appointment: any) => ({
+      id: 'token-1',
+      usedAt: null,
+      expiresAt: new Date(Date.now() + 3600 * 1000),
+      appointmentId: 'appt-1',
+      appointment: {
+        id: 'appt-1',
+        customerId: 'cust-1',
+        startsAt: new Date(Date.now() + 24 * 3600 * 1000),
+        ...appointment,
+      },
+    });
+
+    it('does not decrement twice when the status changed concurrently', async () => {
+      mockPrisma.bookingToken.findFirst.mockResolvedValue(record({ status: 'pending' }));
+      const tx = {
+        bookingToken: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        appointment: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        customer: { update: jest.fn() },
+      };
+      mockPrisma.$transaction.mockImplementation((fn: any) => fn(tx));
+
+      await expect(service.cancelBooking('t')).rejects.toThrow(BadRequestException);
+      expect(tx.customer.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a token used concurrently', async () => {
+      mockPrisma.bookingToken.findFirst.mockResolvedValue(record({ status: 'pending' }));
+      const tx = {
+        bookingToken: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        appointment: { updateMany: jest.fn() },
+        customer: { update: jest.fn() },
+      };
+      mockPrisma.$transaction.mockImplementation((fn: any) => fn(tx));
+
+      await expect(service.cancelBooking('t')).rejects.toThrow(NotFoundException);
+      expect(tx.appointment.updateMany).not.toHaveBeenCalled();
+    });
+
+    it.each(['no_show', 'in_progress'])('does not let the customer cancel a %s appointment', async (status) => {
+      mockPrisma.bookingToken.findFirst.mockResolvedValue(record({ status }));
+      await expect(service.cancelBooking('t')).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('does not cancel an appointment that already started', async () => {
+      mockPrisma.bookingToken.findFirst.mockResolvedValue(
+        record({ status: 'confirmed', startsAt: new Date(Date.now() - 60_000) }),
+      );
+      await expect(service.cancelBooking('t')).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -472,13 +550,40 @@ describe('BookingService', () => {
       appointment: { id: 'appt-1', status },
     });
 
+    const confirmTx = (tokenCount: number, apptCount: number, current?: string) => {
+      const tx = {
+        bookingToken: { updateMany: jest.fn().mockResolvedValue({ count: tokenCount }) },
+        appointment: {
+          updateMany: jest.fn().mockResolvedValue({ count: apptCount }),
+          findUnique: jest.fn().mockResolvedValue({ status: current }),
+        },
+      };
+      mockPrisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      return tx;
+    };
+
     it('confirms a pending appointment', async () => {
       mockPrisma.bookingToken.findFirst.mockResolvedValue(mockConfirmRecord('pending'));
-      mockPrisma.$transaction.mockResolvedValue([{}, {}]);
+      const tx = confirmTx(1, 1);
 
       const result = await service.confirmBooking(TOKEN);
-      expect(mockPrisma.$transaction).toHaveBeenCalled();
+      expect(tx.appointment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'appt-1', status: 'pending' },
+        data: { status: 'confirmed' },
+      });
       expect(result.message).toContain('confirmed');
+    });
+
+    it('treats an already-confirmed appointment as success', async () => {
+      mockPrisma.bookingToken.findFirst.mockResolvedValue(mockConfirmRecord('confirmed'));
+      confirmTx(1, 0, 'confirmed');
+      await expect(service.confirmBooking(TOKEN)).resolves.toBeDefined();
+    });
+
+    it('does not resurrect an appointment cancelled concurrently', async () => {
+      mockPrisma.bookingToken.findFirst.mockResolvedValue(mockConfirmRecord('pending'));
+      confirmTx(1, 0, 'cancelled');
+      await expect(service.confirmBooking(TOKEN)).rejects.toThrow(BadRequestException);
     });
 
     it('does not resurrect a cancelled appointment', async () => {

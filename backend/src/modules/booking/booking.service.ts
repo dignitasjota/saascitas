@@ -372,16 +372,32 @@ export class BookingService {
       throw new BadRequestException(`Appointment is already ${appt.status}`);
     }
 
-    await this.prisma.$transaction([
-      this.prisma.bookingToken.update({
-        where: { id: record.id },
+    // Claim the token and move the appointment atomically and conditionally,
+    // so a concurrent cancellation can't be overwritten by this confirm.
+    await this.prisma.$transaction(async (tx) => {
+      const token = await tx.bookingToken.updateMany({
+        where: { id: record.id, usedAt: null },
         data: { usedAt: new Date() },
-      }),
-      this.prisma.appointment.update({
-        where: { id: record.appointmentId },
+      });
+      if (token.count === 0) {
+        throw new NotFoundException('Invalid or expired confirmation link');
+      }
+      const appt = await tx.appointment.updateMany({
+        where: { id: record.appointmentId, status: 'pending' },
         data: { status: 'confirmed' },
-      }),
-    ]);
+      });
+      if (appt.count === 0) {
+        // Already confirmed (e.g. autoConfirm) is fine; anything else changed
+        // under us and must not be resurrected.
+        const current = await tx.appointment.findUnique({
+          where: { id: record.appointmentId },
+          select: { status: true },
+        });
+        if (current?.status !== 'confirmed' && current?.status !== 'in_progress') {
+          throw new BadRequestException(`Appointment is already ${current?.status}`);
+        }
+      }
+    });
 
     return { message: 'Appointment confirmed successfully' };
   }
@@ -398,30 +414,44 @@ export class BookingService {
     if (!record) throw new NotFoundException('Invalid or expired cancellation link');
     if (record.expiresAt < new Date()) throw new GoneException('This cancellation link has expired');
 
+    // A customer may only cancel an upcoming appointment that hasn't been
+    // dealt with yet: not one in progress, completed, or marked as a no-show
+    // (which would erase the no-show from the business's records).
     const appt = record.appointment;
-    if (appt.status === 'cancelled' || appt.status === 'completed') {
+    if (appt.status !== 'pending' && appt.status !== 'confirmed') {
       throw new BadRequestException(`Appointment is already ${appt.status}`);
     }
+    if (appt.startsAt.getTime() <= Date.now()) {
+      throw new BadRequestException('This appointment has already started');
+    }
 
-    await this.prisma.$transaction([
-      this.prisma.bookingToken.update({
-        where: { id: record.id },
+    await this.prisma.$transaction(async (tx) => {
+      const token = await tx.bookingToken.updateMany({
+        where: { id: record.id, usedAt: null },
         data: { usedAt: new Date() },
-      }),
-      this.prisma.appointment.update({
-        where: { id: record.appointmentId },
+      });
+      if (token.count === 0) {
+        throw new NotFoundException('Invalid or expired cancellation link');
+      }
+      // Compare-and-set on the status we checked, so a concurrent
+      // cancellation from the dashboard can't decrement the stats twice.
+      const cancelled = await tx.appointment.updateMany({
+        where: { id: record.appointmentId, status: appt.status },
         data: {
           status: 'cancelled',
           cancelledAt: new Date(),
           cancellationReason: reason ?? 'Cancelled by customer',
         },
-      }),
+      });
+      if (cancelled.count === 0) {
+        throw new BadRequestException('Appointment status changed meanwhile');
+      }
       // Undo the +1 added to the customer at booking time.
-      this.prisma.customer.update({
+      await tx.customer.update({
         where: { id: appt.customerId },
         data: { totalAppointments: { decrement: 1 } },
-      }),
-    ]);
+      });
+    });
 
     // Remove queued reminder if not yet sent
     void this.notificationsService

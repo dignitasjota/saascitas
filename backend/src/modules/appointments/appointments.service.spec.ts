@@ -51,6 +51,8 @@ describe('AppointmentsService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
     },
     service: { findFirst: jest.fn() },
     employee: { findFirst: jest.fn() },
@@ -275,9 +277,8 @@ describe('AppointmentsService', () => {
       mockPrisma.appointment.findFirst.mockResolvedValue(
         makeAppointment({ status: 'pending' }),
       );
-      mockPrisma.appointment.update.mockResolvedValue(
-        makeAppointment({ status: 'confirmed' }),
-      );
+      mockPrisma.appointment.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.appointment.findUniqueOrThrow.mockResolvedValue(makeAppointment({ status: 'confirmed' }));
 
       const result = await service.updateStatus(TENANT, 'appt-1', {
         status: 'confirmed',
@@ -309,14 +310,15 @@ describe('AppointmentsService', () => {
       mockPrisma.appointment.findFirst.mockResolvedValue(
         makeAppointment({ status: 'pending' }),
       );
-      mockPrisma.appointment.update.mockResolvedValue({});
+      mockPrisma.appointment.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.appointment.findUniqueOrThrow.mockResolvedValue({});
 
       await service.updateStatus(TENANT, 'appt-1', {
         status: 'cancelled',
         cancellationReason: 'Cliente no vino',
       });
 
-      expect(mockPrisma.appointment.update).toHaveBeenCalledWith(
+      expect(mockPrisma.appointment.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             cancelledAt: expect.any(Date),
@@ -330,7 +332,8 @@ describe('AppointmentsService', () => {
       mockPrisma.appointment.findFirst.mockResolvedValue(
         makeAppointment({ status: 'pending' }),
       );
-      mockPrisma.appointment.update.mockResolvedValue({});
+      mockPrisma.appointment.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.appointment.findUniqueOrThrow.mockResolvedValue({});
 
       await service.updateStatus(TENANT, 'appt-1', { status: 'cancelled' });
 
@@ -341,7 +344,8 @@ describe('AppointmentsService', () => {
       mockPrisma.appointment.findFirst.mockResolvedValue(
         makeAppointment({ status: 'pending' }),
       );
-      mockPrisma.appointment.update.mockResolvedValue({});
+      mockPrisma.appointment.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.appointment.findUniqueOrThrow.mockResolvedValue({});
 
       await service.updateStatus(TENANT, 'appt-1', { status: 'confirmed' });
 
@@ -352,7 +356,8 @@ describe('AppointmentsService', () => {
       mockPrisma.appointment.findFirst.mockResolvedValue(
         makeAppointment({ status: 'pending', customerId: 'cust-1' }),
       );
-      mockPrisma.appointment.update.mockResolvedValue({});
+      mockPrisma.appointment.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.appointment.findUniqueOrThrow.mockResolvedValue({});
 
       await service.updateStatus(TENANT, 'appt-1', { status: 'cancelled' });
 
@@ -366,7 +371,8 @@ describe('AppointmentsService', () => {
       mockPrisma.appointment.findFirst.mockResolvedValue(
         makeAppointment({ status: 'in_progress', customerId: 'cust-1', priceCents: 5000 }),
       );
-      mockPrisma.appointment.update.mockResolvedValue({});
+      mockPrisma.appointment.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.appointment.findUniqueOrThrow.mockResolvedValue({});
 
       await service.updateStatus(TENANT, 'appt-1', { status: 'completed' });
 
@@ -374,6 +380,24 @@ describe('AppointmentsService', () => {
         where: { id: 'cust-1' },
         data: { totalSpentCents: { increment: BigInt(5000) } },
       });
+    });
+
+    it('applies the change only if the status is still the one validated', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'pending', customerId: 'cust-1' }),
+      );
+      mockPrisma.appointment.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.updateStatus(TENANT, 'appt-1', { status: 'cancelled' }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockPrisma.appointment.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'appt-1', tenantId: TENANT, status: 'pending' },
+        }),
+      );
+      // No double decrement when a concurrent cancellation won the race.
+      expect(mockPrisma.customer.update).not.toHaveBeenCalled();
     });
   });
 
