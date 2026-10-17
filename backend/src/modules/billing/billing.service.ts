@@ -9,7 +9,9 @@ import Stripe from 'stripe';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 
-export type PlanKey = 'basic' | 'professional' | 'business';
+import { PLAN_MAX_EMPLOYEES, PlanKey } from '../../common/constants/plans';
+
+export type { PlanKey };
 
 const PLAN_PRICE_ENV: Record<PlanKey, string> = {
   basic: 'STRIPE_PRICE_BASIC',
@@ -67,16 +69,18 @@ export class BillingService {
       }
     }
 
+    // Since API version 2025-03-31.basil the billing period lives on the
+    // subscription items, not on the subscription itself.
+    const periodEnd = subscription?.items?.data?.[0]?.current_period_end;
+
     return {
       plan: tenant.plan,
       planStatus: tenant.planStatus,
       trialEndsAt: tenant.trialEndsAt,
       maxEmployees: tenant.maxEmployees,
       hasActiveSubscription: !!subscription && subscription.status === 'active',
-      currentPeriodEnd: subscription
-        ? new Date((subscription as any).current_period_end * 1000)
-        : null,
-      cancelAtPeriodEnd: (subscription as any)?.cancel_at_period_end ?? false,
+      currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
+      cancelAtPeriodEnd: subscription?.cancel_at_period_end ?? false,
     };
   }
 
@@ -252,6 +256,7 @@ export class BillingService {
   private async onSubscriptionUpdated(subscription: Stripe.Subscription) {
     const tenantId = subscription.metadata?.tenantId;
     if (!tenantId) return;
+    if (!(await this.isCurrentSubscription(tenantId, subscription.id))) return;
 
     const status = this.mapStripeStatus(subscription.status);
     // Derive the plan from the CURRENT price on the subscription, not the
@@ -277,6 +282,7 @@ export class BillingService {
   private async onSubscriptionDeleted(subscription: Stripe.Subscription) {
     const tenantId = subscription.metadata?.tenantId;
     if (!tenantId) return;
+    if (!(await this.isCurrentSubscription(tenantId, subscription.id))) return;
 
     await this.prisma.tenant.update({
       where: { id: tenantId },
@@ -284,7 +290,7 @@ export class BillingService {
         plan: 'basic',
         planStatus: 'cancelled' as any,
         stripeSubscriptionId: null,
-        maxEmployees: 1,
+        maxEmployees: PLAN_MAX_EMPLOYEES.basic,
       },
     });
 
@@ -308,6 +314,30 @@ export class BillingService {
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
+  /**
+   * Webhooks can arrive late or out of order. An event about an OLD
+   * subscription (e.g. its deletion after the tenant re-subscribed) must not
+   * clobber the current one. Unknown tenant subscription id (checkout event
+   * not processed yet) is accepted.
+   */
+  private async isCurrentSubscription(
+    tenantId: string,
+    subscriptionId: string,
+  ): Promise<boolean> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { stripeSubscriptionId: true },
+    });
+    if (!tenant) return false;
+    if (tenant.stripeSubscriptionId && tenant.stripeSubscriptionId !== subscriptionId) {
+      this.logger.warn(
+        `Ignoring event for stale subscription ${subscriptionId} (tenant ${tenantId} has ${tenant.stripeSubscriptionId})`,
+      );
+      return false;
+    }
+    return true;
+  }
+
   /** Map the subscription's current price id back to a plan key. */
   private planFromSubscription(
     subscription: Stripe.Subscription,
@@ -325,12 +355,9 @@ export class BillingService {
   }
 
   private getPlanLimits(plan: PlanKey): { maxEmployees: number } {
-    const limits: Record<PlanKey, { maxEmployees: number }> = {
-      basic: { maxEmployees: 1 },
-      professional: { maxEmployees: 5 },
-      business: { maxEmployees: 20 },
+    return {
+      maxEmployees: PLAN_MAX_EMPLOYEES[plan] ?? PLAN_MAX_EMPLOYEES.basic,
     };
-    return limits[plan] ?? limits.basic;
   }
 
   private mapStripeStatus(

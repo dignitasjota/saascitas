@@ -176,10 +176,44 @@ describe('BillingService', () => {
   // ─── onSubscriptionUpdated (plan from current price) ─────────────────────────
 
   describe('onSubscriptionUpdated', () => {
-    beforeEach(() => mockPrisma.tenant.update.mockResolvedValue({}));
+    beforeEach(() => {
+      mockPrisma.tenant.update.mockResolvedValue({});
+      mockPrisma.tenant.findUnique.mockResolvedValue({ stripeSubscriptionId: 'sub_1' });
+    });
+
+    it('ignores events about a subscription that is no longer the current one', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({ stripeSubscriptionId: 'sub_new' });
+
+      await (service as any).onSubscriptionUpdated({
+        id: 'sub_old',
+        metadata: { tenantId: TENANT_ID },
+        status: 'canceled',
+        items: { data: [] },
+      });
+      await (service as any).onSubscriptionDeleted({
+        id: 'sub_old',
+        metadata: { tenantId: TENANT_ID },
+      });
+
+      expect(mockPrisma.tenant.update).not.toHaveBeenCalled();
+    });
+
+    it('applies the deletion of the current subscription', async () => {
+      await (service as any).onSubscriptionDeleted({
+        id: 'sub_1',
+        metadata: { tenantId: TENANT_ID },
+      });
+
+      expect(mockPrisma.tenant.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ planStatus: 'cancelled', stripeSubscriptionId: null }),
+        }),
+      );
+    });
 
     it('derives the plan from the current price, ignoring stale metadata', async () => {
       const subscription = {
+        id: 'sub_1',
         metadata: { tenantId: TENANT_ID, plan: 'basic' }, // stale (from checkout)
         status: 'active',
         items: { data: [{ price: { id: 'price_professional' } }] },
@@ -196,6 +230,7 @@ describe('BillingService', () => {
 
     it('falls back to metadata when the price is unknown', async () => {
       const subscription = {
+        id: 'sub_1',
         metadata: { tenantId: TENANT_ID, plan: 'business' },
         status: 'active',
         items: { data: [{ price: { id: 'price_unknown' } }] },
@@ -248,9 +283,10 @@ describe('BillingService', () => {
         maxEmployees: 5,
       });
 
+      // Basil+ API versions: the period lives on the subscription items.
       const mockSubscription = {
         status: 'active',
-        current_period_end: 1750000000,
+        items: { data: [{ current_period_end: 1750000000 }] },
         cancel_at_period_end: false,
       };
       stripe.subscriptions.retrieve.mockResolvedValue(mockSubscription);
@@ -258,6 +294,7 @@ describe('BillingService', () => {
       const result = await service.getBillingStatus(TENANT_ID);
 
       expect(stripe.subscriptions.retrieve).toHaveBeenCalledWith('sub_123');
+      expect(result.currentPeriodEnd).toEqual(new Date(1750000000 * 1000));
       expect(result.hasActiveSubscription).toBe(true);
       expect(result.cancelAtPeriodEnd).toBe(false);
     });

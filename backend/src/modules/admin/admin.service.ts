@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UpdateTenantPlanDto } from './dto/update-tenant-plan.dto';
+import { PLAN_MAX_EMPLOYEES, PlanKey } from '../../common/constants/plans';
 
 @Injectable()
 export class AdminService {
@@ -133,14 +134,9 @@ export class AdminService {
     if (dto.plan) updateData.plan = dto.plan;
     if (dto.planStatus) updateData.planStatus = dto.planStatus;
 
-    // Adjust maxEmployees based on plan
-    const planLimits: Record<string, number> = {
-      basic: 1,
-      professional: 5,
-      business: 999,
-    };
-    if (dto.plan && planLimits[dto.plan] !== undefined) {
-      updateData.maxEmployees = planLimits[dto.plan];
+    // Adjust maxEmployees based on plan (same limits as billing)
+    if (dto.plan && dto.plan in PLAN_MAX_EMPLOYEES) {
+      updateData.maxEmployees = PLAN_MAX_EMPLOYEES[dto.plan as PlanKey];
     }
 
     return this.prisma.tenant.update({
