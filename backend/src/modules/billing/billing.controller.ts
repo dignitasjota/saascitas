@@ -14,6 +14,7 @@ import { BillingService, PlanKey } from './billing.service';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { IsIn, IsNotEmpty, IsString } from 'class-validator';
+import { SkipThrottle } from '@nestjs/throttler';
 
 class CreateCheckoutDto {
   @IsString()
@@ -48,6 +49,7 @@ export class BillingController {
   }
 
   @Public()
+  @SkipThrottle() // Stripe retries in bursts; requests are signature-verified
   @Post('webhook')
   @HttpCode(200)
   async handleWebhook(
