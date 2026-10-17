@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { hash, verify } from '@node-rs/argon2';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateProfileDto, ChangePasswordDto } from './dto/update-profile.dto';
@@ -50,9 +51,12 @@ export class UsersService {
   }
 
   async create(tenantId: string, dto: CreateUserDto) {
-    // Check unique email within tenant
+    // Emails identify the account at login across all tenants, so they must
+    // be unique platform-wide (not just within this tenant).
+    const email = dto.email.toLowerCase();
     const existing = await this.prisma.user.findFirst({
-      where: { email: dto.email.toLowerCase(), tenantId, deletedAt: null },
+      where: { email, deletedAt: null },
+      select: { id: true },
     });
     if (existing) throw new ConflictException('Email already in use');
 
@@ -71,21 +75,25 @@ export class UsersService {
 
     const passwordHash = await hash(dto.password, ARGON2_OPTIONS);
 
-    const user = await this.prisma.user.create({
-      data: {
-        tenantId,
-        email: dto.email.toLowerCase(),
-        passwordHash,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        phone: dto.phone,
-        role: dto.role,
-        employeeId: dto.employeeId ?? null,
-      },
-      select: USER_SELECT,
-    });
-
-    return user;
+    try {
+      return await this.prisma.user.create({
+        data: {
+          tenantId,
+          email,
+          passwordHash,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          phone: dto.phone,
+          role: dto.role,
+          employeeId: dto.employeeId ?? null,
+        },
+        select: USER_SELECT,
+      });
+    } catch (err) {
+      // Lost a race against a concurrent signup/creation with the same email.
+      if (isUniqueViolation(err)) throw new ConflictException('Email already in use');
+      throw err;
+    }
   }
 
   async update(tenantId: string, id: string, dto: UpdateUserDto, requesterId: string, requesterRole: string) {

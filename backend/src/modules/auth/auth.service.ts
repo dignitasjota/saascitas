@@ -18,6 +18,7 @@ import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { generateUniqueSlug } from '../../common/utils/slug';
+import { isUniqueViolation } from '../../common/utils/prisma-errors';
 
 const RESET_TOKEN_TTL = 60 * 60; // 1 hour in seconds
 const RESET_KEY_PREFIX = 'pwd_reset:';
@@ -69,43 +70,51 @@ export class AuthService {
     const slug = generateUniqueSlug(dto.companyName);
 
     // Create tenant + owner in a transaction
-    const result = await this.prisma.$transaction(async (tx) => {
-      const tenant = await tx.tenant.create({
-        data: {
-          name: dto.companyName,
-          slug,
-          email: dto.email.toLowerCase(),
-          phone: dto.phone,
-          trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days
-        },
-      });
+    const result = await this.prisma
+      .$transaction(async (tx) => {
+        const tenant = await tx.tenant.create({
+          data: {
+            name: dto.companyName,
+            slug,
+            email: dto.email.toLowerCase(),
+            phone: dto.phone,
+            trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days
+          },
+        });
 
-      // Create default employee for the owner
-      const employee = await tx.employee.create({
-        data: {
-          tenantId: tenant.id,
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          email: dto.email.toLowerCase(),
-          phone: dto.phone,
-        },
-      });
+        // Create default employee for the owner
+        const employee = await tx.employee.create({
+          data: {
+            tenantId: tenant.id,
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            email: dto.email.toLowerCase(),
+            phone: dto.phone,
+          },
+        });
 
-      const user = await tx.user.create({
-        data: {
-          tenantId: tenant.id,
-          email: dto.email.toLowerCase(),
-          passwordHash,
-          role: 'owner',
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          phone: dto.phone,
-          employeeId: employee.id,
-        },
-      });
+        const user = await tx.user.create({
+          data: {
+            tenantId: tenant.id,
+            email: dto.email.toLowerCase(),
+            passwordHash,
+            role: 'owner',
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            phone: dto.phone,
+            employeeId: employee.id,
+          },
+        });
 
-      return { tenant, user };
-    });
+        return { tenant, user };
+      })
+      .catch((err) => {
+        // Concurrent registration with the same email (unique index).
+        if (isUniqueViolation(err)) {
+          throw new ConflictException('Email already registered');
+        }
+        throw err;
+      });
 
     // Generate tokens
     const tokens = await this.generateTokens(
