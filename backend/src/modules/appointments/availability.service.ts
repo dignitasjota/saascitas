@@ -97,7 +97,9 @@ export class AvailabilityService {
       workingPeriods = hours.map((h) => ({ start: h.startTime, end: h.endTime }));
     }
 
-    // 3. Get existing appointments that START on this civil day (tenant tz)
+    // 3. Get existing appointments that OVERLAP this civil day (tenant tz),
+    // widened by the buffer: one starting the evening before and running past
+    // midnight, or one right after midnight within the buffer, still blocks.
     const dayStart = startOfDayUtc(date, tz);
     const dayEnd = endOfDayUtc(date, tz);
 
@@ -105,7 +107,8 @@ export class AvailabilityService {
       where: {
         employeeId,
         tenantId,
-        startsAt: { gte: dayStart, lt: dayEnd },
+        startsAt: { lt: new Date(dayEnd.getTime() + bufferMs) },
+        endsAt: { gt: new Date(dayStart.getTime() - bufferMs) },
         status: { notIn: ['cancelled', 'no_show'] },
       },
       select: { startsAt: true, endsAt: true },

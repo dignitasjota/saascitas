@@ -335,4 +335,24 @@ describe('AvailabilityService', () => {
       expect(starts).not.toContain('14:00');
     });
   });
+
+  describe('day boundaries', () => {
+    it('queries appointments overlapping the day (not just starting on it)', async () => {
+      mockPrisma.workingHour.findMany.mockResolvedValue([
+        { startTime: '00:00', endTime: '03:00' },
+      ]);
+      // Started the evening before, runs until 01:00 of DATE.
+      mockPrisma.appointment.findMany.mockResolvedValue([
+        { startsAt: makeDate('2026-04-06', '23:00'), endsAt: makeDate(DATE, '01:00') },
+      ]);
+
+      const slots = await service.getAvailableSlots(TENANT_ID, EMPLOYEE_ID, DATE, 60);
+
+      const where = mockPrisma.appointment.findMany.mock.calls[0][0].where;
+      expect(where.startsAt).toEqual({ lt: makeDate('2026-04-08', '00:00') });
+      expect(where.endsAt).toEqual({ gt: makeDate(DATE, '00:00') });
+      expect(slots.find((s) => s.start === '00:00')!.available).toBe(false);
+      expect(slots.find((s) => s.start === '01:00')!.available).toBe(true);
+    });
+  });
 });
