@@ -26,16 +26,37 @@ export class ServicesService {
   }
 
   async create(tenantId: string, dto: CreateServiceDto) {
-    return this.prisma.service.create({
-      data: {
-        tenantId,
-        name: dto.name,
-        description: dto.description,
-        durationMinutes: dto.durationMinutes ?? 60,
-        priceCents: dto.priceCents,
-        color: dto.color,
-        isPublic: dto.isPublic ?? true,
-      },
+    // A new service is offered by every active employee by default; otherwise
+    // nobody could book it online until someone linked it by hand.
+    return this.prisma.$transaction(async (tx) => {
+      const service = await tx.service.create({
+        data: {
+          tenantId,
+          name: dto.name,
+          description: dto.description,
+          durationMinutes: dto.durationMinutes ?? 60,
+          priceCents: dto.priceCents,
+          color: dto.color,
+          isPublic: dto.isPublic ?? true,
+        },
+      });
+
+      const employees = await tx.employee.findMany({
+        where: { tenantId, isActive: true, deletedAt: null },
+        select: { id: true },
+      });
+      if (employees.length > 0) {
+        await tx.employeeService.createMany({
+          data: employees.map((e) => ({
+            tenantId,
+            employeeId: e.id,
+            serviceId: service.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      return service;
     });
   }
 

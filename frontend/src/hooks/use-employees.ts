@@ -59,3 +59,20 @@ export function useUpdateEmployee() {
     },
   })
 }
+
+export function useSetEmployeeServices() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, serviceIds }: { id: string; serviceIds: string[] }) => {
+      const res = await apiClient.put(`/employees/${id}/services`, { serviceIds })
+      return res.data.data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['employees'] })
+      toast.success('Servicios actualizados')
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.detail || 'Error al guardar los servicios')
+    },
+  })
+}

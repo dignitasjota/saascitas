@@ -6,7 +6,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorState } from '@/components/ui/error-state'
-import { useEmployees, useCreateEmployee } from '@/hooks/use-employees'
+import { useEmployees, useCreateEmployee, useSetEmployeeServices } from '@/hooks/use-employees'
+import { useServices } from '@/hooks/use-services'
+import type { Employee } from '@/types/api'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -29,7 +31,10 @@ const COLORS = ['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899','#14
 
 export default function EmployeesPage() {
   const [showNew, setShowNew] = useState(false)
+  const [editingServices, setEditingServices] = useState<Employee | null>(null)
   const { data: employees = [], isLoading, isError, refetch } = useEmployees()
+  const { data: services = [] } = useServices()
+  const serviceName = new Map(services.map(s => [s.id, s.name]))
 
   return (
     <div className="space-y-5">
@@ -86,11 +91,25 @@ export default function EmployeesPage() {
                 ))}
               </div>
             )}
+            <div className="flex items-start justify-between gap-2 border-t pt-3">
+              <p className="text-xs text-muted-foreground">
+                {(e.employeeServices?.length ?? 0) === 0
+                  ? 'No ofrece ningún servicio (no aparece en la reserva online)'
+                  : e.employeeServices!
+                      .map(es => serviceName.get(es.serviceId))
+                      .filter(Boolean)
+                      .join(' · ')}
+              </p>
+              <Button size="sm" variant="outline" onClick={() => setEditingServices(e)}>
+                Servicios
+              </Button>
+            </div>
           </div>
         ))}
       </div>
 
       <NewEmployeeDialog open={showNew} onClose={() => setShowNew(false)} />
+      <EmployeeServicesDialog employee={editingServices} onClose={() => setEditingServices(null)} />
     </div>
   )
 }
@@ -155,6 +174,76 @@ function NewEmployeeDialog({ open, onClose }: { open: boolean; onClose: () => vo
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function EmployeeServicesDialog({ employee, onClose }: { employee: Employee | null; onClose: () => void }) {
+  const { data: services = [] } = useServices()
+  const setServices = useSetEmployeeServices()
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [seededFor, setSeededFor] = useState<string | null>(null)
+
+  // Re-seed the selection whenever a different employee is opened.
+  if (employee && seededFor !== employee.id) {
+    setSeededFor(employee.id)
+    setSelected(new Set(employee.employeeServices?.map(es => es.serviceId) ?? []))
+  }
+
+  const toggle = (id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const onSave = async () => {
+    if (!employee) return
+    await setServices.mutateAsync({ id: employee.id, serviceIds: [...selected] })
+    setSeededFor(null)
+    onClose()
+  }
+
+  const close = () => {
+    setSeededFor(null)
+    onClose()
+  }
+
+  return (
+    <Dialog open={!!employee} onOpenChange={v => !v && close()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            Servicios de {employee?.firstName} {employee?.lastName}
+          </DialogTitle>
+        </DialogHeader>
+        {services.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Todavía no hay servicios creados.</p>
+        ) : (
+          <div className="space-y-2">
+            {services.map(s => (
+              <label key={s.id} className="flex items-center gap-3 rounded-md border p-2.5 cursor-pointer hover:bg-muted/40">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={selected.has(s.id)}
+                  onChange={() => toggle(s.id)}
+                />
+                <span className="text-sm">{s.name}</span>
+                <span className="ml-auto text-xs text-muted-foreground">{s.durationMinutes} min</span>
+              </label>
+            ))}
+          </div>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={close}>Cancelar</Button>
+          <Button type="button" onClick={onSave} disabled={setServices.isPending}>
+            {setServices.isPending ? 'Guardando...' : 'Guardar'}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

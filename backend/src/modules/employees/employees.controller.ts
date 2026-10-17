@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Body,
   Param,
@@ -13,6 +14,7 @@ import { CreateEmployeeDto, UpdateEmployeeDto } from './dto/create-employee.dto'
 import {
   SetWorkingHoursDto,
   CreateScheduleExceptionDto,
+  SetEmployeeServicesDto,
 } from './dto/working-hours.dto';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -66,6 +68,21 @@ export class EmployeesController {
   ) {
     await this.employeesService.remove(user.tid, id);
     return { data: { message: 'Employee deactivated' } };
+  }
+
+  // ========================================
+  // Services offered
+  // ========================================
+
+  @Put(':id/services')
+  @Roles(UserRole.owner, UserRole.admin)
+  async setServices(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: SetEmployeeServicesDto,
+  ) {
+    const data = await this.employeesService.setServices(user.tid, id, dto.serviceIds);
+    return { data };
   }
 
   // ========================================

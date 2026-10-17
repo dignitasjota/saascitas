@@ -45,6 +45,7 @@ export interface Employee {
   specialties: string[]
   isActive: boolean
   createdAt: string
+  employeeServices?: { serviceId: string }[]
 }
 
 export interface Service {

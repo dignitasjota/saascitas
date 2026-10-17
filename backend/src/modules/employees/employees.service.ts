@@ -17,6 +17,7 @@ export class EmployeesService {
   async findAll(tenantId: string) {
     return this.prisma.employee.findMany({
       where: { tenantId, deletedAt: null },
+      include: { employeeServices: { select: { serviceId: true } } },
       orderBy: { createdAt: 'asc' },
     });
   }
@@ -53,16 +54,37 @@ export class EmployeesService {
       );
     }
 
-    return this.prisma.employee.create({
-      data: {
-        tenantId,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        email: dto.email,
-        phone: dto.phone,
-        color: dto.color,
-        specialties: dto.specialties || [],
-      },
+    // New employees offer every active service by default, so they are
+    // bookable online straight away (the owner can narrow it down later).
+    return this.prisma.$transaction(async (tx) => {
+      const employee = await tx.employee.create({
+        data: {
+          tenantId,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          email: dto.email,
+          phone: dto.phone,
+          color: dto.color,
+          specialties: dto.specialties || [],
+        },
+      });
+
+      const services = await tx.service.findMany({
+        where: { tenantId, isActive: true, deletedAt: null },
+        select: { id: true },
+      });
+      if (services.length > 0) {
+        await tx.employeeService.createMany({
+          data: services.map((s) => ({
+            tenantId,
+            employeeId: employee.id,
+            serviceId: s.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      return employee;
     });
   }
 
@@ -81,6 +103,41 @@ export class EmployeesService {
     return this.prisma.employee.update({
       where: { id },
       data: { deletedAt: new Date() },
+    });
+  }
+
+  // ========================================
+  // Services offered
+  // ========================================
+
+  /**
+   * Replace the set of services an employee offers. Public booking only
+   * lists/accepts employees linked to the chosen service.
+   */
+  async setServices(tenantId: string, employeeId: string, serviceIds: string[]) {
+    await this.findById(tenantId, employeeId);
+
+    const uniqueIds = [...new Set(serviceIds)];
+    if (uniqueIds.length > 0) {
+      const count = await this.prisma.service.count({
+        where: { id: { in: uniqueIds }, tenantId, deletedAt: null },
+      });
+      if (count !== uniqueIds.length) {
+        throw new BadRequestException('One or more services were not found');
+      }
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.employeeService.deleteMany({ where: { employeeId, tenantId } });
+      if (uniqueIds.length > 0) {
+        await tx.employeeService.createMany({
+          data: uniqueIds.map((serviceId) => ({ tenantId, employeeId, serviceId })),
+        });
+      }
+      return tx.employeeService.findMany({
+        where: { employeeId, tenantId },
+        select: { serviceId: true },
+      });
     });
   }
 

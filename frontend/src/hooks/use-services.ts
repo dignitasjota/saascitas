@@ -24,6 +24,8 @@ export function useCreateService() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['services'] })
+      // The backend links new services to every active employee.
+      qc.invalidateQueries({ queryKey: ['employees'] })
       toast.success('Servicio creado')
     },
     onError: (error: any) => {
