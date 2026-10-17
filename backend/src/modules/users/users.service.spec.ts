@@ -3,7 +3,7 @@ import { UsersService } from './users.service';
 
 jest.mock('@node-rs/argon2', () => ({
   hash: jest.fn().mockResolvedValue('hashed'),
-  verify: jest.fn(),
+  verify: jest.fn().mockResolvedValue(true),
 }));
 
 const DTO = {
@@ -16,7 +16,8 @@ const DTO = {
 
 function setup() {
   const prisma: any = {
-    user: { findFirst: jest.fn(), create: jest.fn() },
+    user: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
+    refreshToken: { findFirst: jest.fn(), updateMany: jest.fn() },
     employee: { findFirst: jest.fn() },
   };
   return { prisma, service: new UsersService(prisma) };
@@ -50,5 +51,34 @@ describe('UsersService.create', () => {
 
     await service.create('tenant-1', DTO);
     expect(prisma.user.create.mock.calls[0][0].data.email).toBe('pepe@example.com');
+  });
+});
+
+describe('UsersService.changePassword', () => {
+  const dto = { currentPassword: 'Old12345', newPassword: 'New12345' } as any;
+
+  it('revokes every other session but keeps the current one', async () => {
+    const { prisma, service } = setup();
+    prisma.user.findFirst.mockResolvedValue({ id: 'u1', passwordHash: 'h' });
+    prisma.refreshToken.findFirst.mockResolvedValue({ familyId: 'fam-current' });
+
+    await service.changePassword('t1', 'u1', dto, 'raw-refresh');
+
+    expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'u1', revokedAt: null, familyId: { not: 'fam-current' } },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
+  it('revokes all sessions when the current one is unknown', async () => {
+    const { prisma, service } = setup();
+    prisma.user.findFirst.mockResolvedValue({ id: 'u1', passwordHash: 'h' });
+
+    await service.changePassword('t1', 'u1', dto);
+
+    expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'u1', revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
   });
 });

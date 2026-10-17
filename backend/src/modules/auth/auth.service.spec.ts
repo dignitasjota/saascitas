@@ -13,6 +13,7 @@ jest.mock('ioredis', () => {
   const instance = {
     set: jest.fn().mockResolvedValue('OK'),
     get: jest.fn().mockResolvedValue(null),
+    getdel: jest.fn().mockResolvedValue(null),
     del: jest.fn().mockResolvedValue(1),
   };
   const ctor = jest.fn().mockImplementation(() => instance);
@@ -25,6 +26,7 @@ jest.mock('ioredis', () => {
 const redisMock = (require('ioredis').default as any).__instance as {
   set: jest.Mock;
   get: jest.Mock;
+  getdel: jest.Mock;
   del: jest.Mock;
 };
 
@@ -102,6 +104,7 @@ describe('AuthService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     redisMock.get.mockReset();
+    redisMock.getdel.mockReset();
     redisMock.set.mockResolvedValue('OK');
     redisMock.del.mockResolvedValue(1);
 
@@ -456,7 +459,7 @@ describe('AuthService', () => {
   // ── resetPassword ───────────────────────────────────────────────────────────
   describe('resetPassword', () => {
     it('throws BadRequestException when Redis returns no userId', async () => {
-      redisMock.get.mockResolvedValue(null);
+      redisMock.getdel.mockResolvedValue(null);
 
       await expect(
         service.resetPassword({ token: 'invalid', newPassword: 'newpass123' }),
@@ -464,7 +467,7 @@ describe('AuthService', () => {
     });
 
     it('updates password hash and revokes all refresh tokens on success', async () => {
-      redisMock.get.mockResolvedValue('user-1');
+      redisMock.getdel.mockResolvedValue('user-1');
       mockPrisma.user.update.mockResolvedValue({});
       mockPrisma.refreshToken.updateMany.mockResolvedValue({ count: 2 });
 
@@ -480,7 +483,7 @@ describe('AuthService', () => {
           }),
         }),
       );
-      expect(redisMock.del).toHaveBeenCalled();
+      expect(redisMock.getdel).toHaveBeenCalledWith(expect.stringMatching(/^pwd_reset:/));
       expect(mockPrisma.refreshToken.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { userId: 'user-1', revokedAt: null } }),
       );

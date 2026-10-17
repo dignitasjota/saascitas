@@ -207,6 +207,15 @@ describe('AppointmentsService', () => {
       );
     });
 
+    it('queues the 24h reminder for manual appointments', async () => {
+      await service.create(TENANT, dto);
+
+      expect(mockNotifications.queueBookingReminder).toHaveBeenCalledWith(
+        'appt-1',
+        expect.any(Date),
+      );
+    });
+
     it('throws BadRequestException when service not found', async () => {
       mockPrisma.service.findFirst.mockResolvedValue(null);
 

@@ -402,7 +402,9 @@ export class AuthService {
     const tokenHash = this.hashToken(dto.token);
     const redisKey = `${RESET_KEY_PREFIX}${tokenHash}`;
 
-    const userId = await this.redis.get(redisKey);
+    // GETDEL consumes the token atomically: two concurrent submissions of the
+    // same link can't both reset the password.
+    const userId = await this.redis.getdel(redisKey);
     if (!userId) {
       throw new BadRequestException('El enlace no es válido o ha expirado');
     }
@@ -417,9 +419,6 @@ export class AuthService {
         lockedUntil: null,
       },
     });
-
-    // Invalidate token after use
-    await this.redis.del(redisKey);
 
     // Revoke all refresh tokens for this user (force re-login everywhere)
     await this.prisma.refreshToken.updateMany({

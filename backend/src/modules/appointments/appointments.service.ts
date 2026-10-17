@@ -202,6 +202,12 @@ export class AppointmentsService {
       },
     });
 
+    // Manual appointments get the same 24h reminder as online bookings (it
+    // was only queued if the appointment was later moved). Fire-and-forget.
+    void this.notifications
+      .queueBookingReminder(appointment.id, startsAt)
+      .catch(() => undefined);
+
     return appointment;
   }
 

@@ -6,6 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { hash, verify } from '@node-rs/argon2';
+import { createHash } from 'crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -161,7 +162,17 @@ export class UsersService {
     });
   }
 
-  async changePassword(tenantId: string, id: string, dto: ChangePasswordDto) {
+  /**
+   * Change the password and sign out every OTHER session (a stolen session
+   * must not survive the password change). `currentRefreshToken` is the
+   * caller's refresh cookie; its family is kept so they stay logged in.
+   */
+  async changePassword(
+    tenantId: string,
+    id: string,
+    dto: ChangePasswordDto,
+    currentRefreshToken?: string,
+  ) {
     const user = await this.prisma.user.findFirst({
       where: { id, tenantId, deletedAt: null },
       select: { id: true, passwordHash: true },
@@ -175,6 +186,25 @@ export class UsersService {
     await this.prisma.user.update({
       where: { id },
       data: { passwordHash: newHash },
+    });
+
+    const current = currentRefreshToken
+      ? await this.prisma.refreshToken.findFirst({
+          where: {
+            userId: id,
+            tokenHash: createHash('sha256').update(currentRefreshToken).digest('hex'),
+          },
+          select: { familyId: true },
+        })
+      : null;
+
+    await this.prisma.refreshToken.updateMany({
+      where: {
+        userId: id,
+        revokedAt: null,
+        ...(current && { familyId: { not: current.familyId } }),
+      },
+      data: { revokedAt: new Date() },
     });
   }
 
