@@ -4,9 +4,10 @@ import { Job } from 'bullmq';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { MailerService } from './mailer.service';
 import { NOTIFICATIONS_QUEUE } from './notifications.constants';
-import { formatPrice } from './notifications.utils';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { formatLongDateEs, formatPrice } from './notifications.utils';
+import { formatTimeInTz } from '../../common/utils/timezone';
+
+const DEFAULT_TZ = 'Europe/Madrid';
 
 export type NotificationJobData =
   | { type: 'booking_confirmation'; appointmentId: string }
@@ -63,10 +64,16 @@ export class NotificationsProcessor extends WorkerHost {
     });
 
     const frontendUrl = this.frontendUrl();
+    const tz = appt.tenant.timezone || DEFAULT_TZ;
+    // A booking awaiting the business's approval is not "confirmed" yet.
+    const subject =
+      appt.status === 'confirmed'
+        ? `Cita confirmada — ${appt.tenant.name}`
+        : `Cita registrada — ${appt.tenant.name}`;
 
     await this.mailer.sendMail({
       to: email,
-      subject: `Cita confirmada — ${appt.tenant.name}`,
+      subject,
       template: 'booking-confirmation',
       context: {
         businessName: appt.tenant.name,
@@ -74,8 +81,8 @@ export class NotificationsProcessor extends WorkerHost {
         customerName: `${appt.customer.firstName} ${appt.customer.lastName}`,
         serviceName: appt.service?.name ?? '',
         employeeName: `${appt.employee.firstName} ${appt.employee.lastName}`,
-        date: format(appt.startsAt, "EEEE d 'de' MMMM 'de' yyyy", { locale: es }),
-        time: format(appt.startsAt, 'HH:mm', { locale: es }),
+        date: formatLongDateEs(appt.startsAt, tz),
+        time: formatTimeInTz(appt.startsAt, tz),
         duration: appt.durationMinutes,
         price: appt.priceCents ? formatPrice(appt.priceCents) : null,
         confirmUrl: confirmToken
@@ -88,7 +95,6 @@ export class NotificationsProcessor extends WorkerHost {
     });
 
     // Mark notification as sent in DB
-    const subject = `Cita confirmada — ${appt.tenant.name}`;
     await this.recordNotification(appointmentId, 'booking_confirmation', email, subject);
     this.logger.log(`Confirmation email sent to ${email} for appointment ${appointmentId}`);
   }
@@ -122,6 +128,7 @@ export class NotificationsProcessor extends WorkerHost {
     });
 
     const frontendUrl = this.frontendUrl();
+    const tz = appt.tenant.timezone || DEFAULT_TZ;
 
     await this.mailer.sendMail({
       to: email,
@@ -133,8 +140,8 @@ export class NotificationsProcessor extends WorkerHost {
         customerName: `${appt.customer.firstName} ${appt.customer.lastName}`,
         serviceName: appt.service?.name ?? '',
         employeeName: `${appt.employee.firstName} ${appt.employee.lastName}`,
-        date: format(appt.startsAt, "EEEE d 'de' MMMM", { locale: es }),
-        time: format(appt.startsAt, 'HH:mm', { locale: es }),
+        date: formatLongDateEs(appt.startsAt, tz, false),
+        time: formatTimeInTz(appt.startsAt, tz),
         duration: appt.durationMinutes,
         price: appt.priceCents ? formatPrice(appt.priceCents) : null,
         cancelUrl: cancelToken
@@ -160,7 +167,7 @@ export class NotificationsProcessor extends WorkerHost {
     const appt = await this.prisma.appointment.findUnique({
       where: { id: appointmentId },
       include: {
-        tenant: { select: { name: true, phone: true } },
+        tenant: { select: { name: true, phone: true, timezone: true } },
         customer: { select: { firstName: true, lastName: true, email: true } },
         employee: { select: { firstName: true, lastName: true } },
         service: { select: { name: true } },
