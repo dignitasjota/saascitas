@@ -21,10 +21,20 @@ export class MailerService implements OnModuleInit {
   constructor(private readonly config: ConfigService) {}
 
   onModuleInit() {
+    const port = Number(this.config.get('MAIL_PORT', 1025));
+    // Port 465 is implicit TLS: with secure=false the client waits for a
+    // plaintext greeting that never comes and every send fails. Honour
+    // MAIL_SECURE when set, otherwise infer it from the port.
+    const secureEnv = this.config.get<string>('MAIL_SECURE');
+    const secure =
+      secureEnv !== undefined && secureEnv !== ''
+        ? String(secureEnv).toLowerCase() === 'true'
+        : port === 465;
+
     this.transporter = nodemailer.createTransport({
       host: this.config.get('MAIL_HOST', 'localhost'),
-      port: this.config.get<number>('MAIL_PORT', 1025),
-      secure: false,
+      port,
+      secure,
       // No auth for Mailpit / local dev
       auth: this.config.get('MAIL_USER')
         ? {
