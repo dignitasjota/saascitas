@@ -45,3 +45,16 @@ describe('query DTO validation', () => {
     await expect(asBody({ ...base, date: '2026-03-15' })).resolves.toBeDefined();
   });
 });
+
+describe('UpdateTenantDto.timezone', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { UpdateTenantDto } = require('../../modules/tenants/dto/update-tenant.dto');
+  const asBody = (v: any) => pipe.transform(v, { type: 'body', metatype: UpdateTenantDto });
+
+  it('accepts IANA zones and rejects anything Intl would throw on', async () => {
+    await expect(asBody({ timezone: 'Europe/Madrid' })).resolves.toBeDefined();
+    await expect(asBody({ timezone: 'Atlantic/Canary' })).resolves.toBeDefined();
+    await expect(asBody({ timezone: 'Madrid' })).rejects.toThrow(BadRequestException);
+    await expect(asBody({ timezone: 'GMT+25' })).rejects.toThrow(BadRequestException);
+  });
+});
