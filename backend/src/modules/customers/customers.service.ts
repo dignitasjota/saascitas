@@ -89,10 +89,17 @@ export class CustomersService {
   async update(tenantId: string, id: string, dto: UpdateCustomerDto) {
     await this.findById(tenantId, id);
 
-    return this.prisma.customer.update({
-      where: { id },
-      data: dto,
-    });
+    try {
+      return await this.prisma.customer.update({
+        where: { id },
+        data: dto,
+      });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        throw new ConflictException('Ya existe un cliente con ese teléfono');
+      }
+      throw err;
+    }
   }
 
   async remove(tenantId: string, id: string) {
