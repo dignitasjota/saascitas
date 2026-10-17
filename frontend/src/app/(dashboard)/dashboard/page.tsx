@@ -9,15 +9,18 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AppointmentCard } from '@/components/appointments/appointment-card'
 import { NewAppointmentDialog } from '@/components/appointments/new-appointment-dialog'
+import { AppointmentDetailDialog } from '@/components/appointments/appointment-detail-dialog'
 import { ErrorState } from '@/components/ui/error-state'
 import { useToday } from '@/hooks/use-appointments'
 import { useAuthStore } from '@/stores/auth-store'
 import { useTenantTimezone } from '@/hooks/use-tenant'
 import { formatDate, todayInTimezone } from '@/lib/utils'
 import apiClient from '@/lib/api-client'
+import type { Appointment } from '@/types/api'
 
 export default function DashboardPage() {
   const [showNew, setShowNew] = useState(false)
+  const [selectedAppt, setSelectedAppt] = useState<Appointment | null>(null)
   const { user } = useAuthStore()
   const tz = useTenantTimezone()
   const today = todayInTimezone(tz)
@@ -111,11 +114,13 @@ export default function DashboardPage() {
         {!isLoading && appointments.length > 0 && (
           <div className="space-y-2">
             {appointments.map(a => (
-              <AppointmentCard key={a.id} appointment={a} />
+              <AppointmentCard key={a.id} appointment={a} onClick={() => setSelectedAppt(a)} />
             ))}
           </div>
         )}
       </div>
+
+      <AppointmentDetailDialog appointment={selectedAppt} onClose={() => setSelectedAppt(null)} />
 
       <NewAppointmentDialog
         open={showNew}

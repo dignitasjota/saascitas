@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AppointmentCard } from '@/components/appointments/appointment-card'
 import { NewAppointmentDialog } from '@/components/appointments/new-appointment-dialog'
+import { AppointmentDetailDialog } from '@/components/appointments/appointment-detail-dialog'
 import { ErrorState } from '@/components/ui/error-state'
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -16,6 +17,7 @@ import { downloadCsv } from '@/lib/csv'
 
 export default function AppointmentsPage() {
   const [showNew, setShowNew] = useState(false)
+  const [selectedAppt, setSelectedAppt] = useState<Appointment | null>(null)
   const [exporting, setExporting] = useState(false)
 
   const from = format(subDays(new Date(), 1), 'yyyy-MM-dd')
@@ -72,8 +74,10 @@ export default function AppointmentsPage() {
       )}
 
       <div className="space-y-2">
-        {appointments.map(a => <AppointmentCard key={a.id} appointment={a} />)}
+        {appointments.map(a => <AppointmentCard key={a.id} appointment={a} onClick={() => setSelectedAppt(a)} />)}
       </div>
+
+      <AppointmentDetailDialog appointment={selectedAppt} onClose={() => setSelectedAppt(null)} />
 
       <NewAppointmentDialog open={showNew} onClose={() => setShowNew(false)} />
     </div>

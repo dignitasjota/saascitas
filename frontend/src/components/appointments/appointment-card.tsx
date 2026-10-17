@@ -15,10 +15,13 @@ export function AppointmentCard({ appointment, onClick }: Props) {
   const tz = useTenantTimezone()
   const { employee, customer, service, startsAt, endsAt, status, address, city, priceCents } = appointment
 
+  // A real <button> when interactive, so it is reachable and operable by keyboard.
+  const Wrapper = onClick ? 'button' : 'div'
+
   return (
-    <div
-      onClick={onClick}
-      className="rounded-lg border bg-card p-3 space-y-2 cursor-pointer hover:shadow-sm transition-shadow"
+    <Wrapper
+      {...(onClick && { type: 'button' as const, onClick })}
+      className="block w-full text-left rounded-lg border bg-card p-3 space-y-2 cursor-pointer hover:shadow-sm transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       {/* Time + status */}
       <div className="flex items-center justify-between gap-2">
@@ -64,6 +67,6 @@ export function AppointmentCard({ appointment, onClick }: Props) {
           <span className="font-medium text-foreground">{formatPrice(priceCents)}</span>
         )}
       </div>
-    </div>
+    </Wrapper>
   )
 }

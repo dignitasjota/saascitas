@@ -11,14 +11,13 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorState } from '@/components/ui/error-state'
 import { NewAppointmentDialog } from '@/components/appointments/new-appointment-dialog'
-import { StatusBadge } from '@/components/appointments/status-badge'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { AppointmentDetailDialog } from '@/components/appointments/appointment-detail-dialog'
 import { useCalendar } from '@/hooks/use-appointments'
 import { useEmployees } from '@/hooks/use-employees'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { formatTime, formatPrice } from '@/lib/utils'
+import { formatTime } from '@/lib/utils'
 import type { Appointment } from '@/types/api'
 
 // Default visible window; the grid expands beyond it if any appointment falls
@@ -232,50 +231,8 @@ export default function CalendarPage() {
         )}
       </div>
 
-      {/* Appointment detail — Dialog handles focus-trap, Escape and aria-modal */}
-      <Dialog open={!!selectedAppt} onOpenChange={(v) => !v && setSelectedAppt(null)}>
-        <DialogContent className="max-w-sm">
-          {selectedAppt && (
-            <>
-              <DialogHeader>
-                <div className="flex items-start justify-between gap-2">
-                  <DialogTitle>
-                    {selectedAppt.customer?.firstName} {selectedAppt.customer?.lastName}
-                  </DialogTitle>
-                  <StatusBadge status={selectedAppt.status} />
-                </div>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {formatTime(selectedAppt.startsAt)} – {formatTime(selectedAppt.endsAt)}
-                </p>
-              </DialogHeader>
-
-              <div className="space-y-3">
-                {selectedAppt.service && (
-                  <p className="text-sm">{selectedAppt.service.name}</p>
-                )}
-                {selectedAppt.customer?.phone && (
-                  <p className="text-sm text-muted-foreground">{selectedAppt.customer.phone}</p>
-                )}
-                {(selectedAppt.address || selectedAppt.city) && (
-                  <p className="text-sm text-muted-foreground">
-                    {[selectedAppt.address, selectedAppt.city].filter(Boolean).join(', ')}
-                  </p>
-                )}
-                {selectedAppt.notes && (
-                  <p className="text-sm italic text-muted-foreground">"{selectedAppt.notes}"</p>
-                )}
-                {selectedAppt.priceCents != null && (
-                  <p className="text-sm font-semibold">{formatPrice(selectedAppt.priceCents)}</p>
-                )}
-
-                <Button variant="outline" className="w-full" onClick={() => setSelectedAppt(null)}>
-                  Cerrar
-                </Button>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Appointment detail + status actions (Dialog handles focus-trap/Escape) */}
+      <AppointmentDetailDialog appointment={selectedAppt} onClose={() => setSelectedAppt(null)} />
 
       <NewAppointmentDialog
         open={showNew}
