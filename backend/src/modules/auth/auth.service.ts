@@ -30,6 +30,9 @@ const ARGON2_OPTIONS = {
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+// Window in which re-presenting a just-rotated refresh token is treated as a
+// concurrent refresh (another tab) instead of token theft.
+const REFRESH_REUSE_GRACE_MS = 15 * 1000;
 
 @Injectable()
 export class AuthService {
@@ -223,67 +226,123 @@ export class AuthService {
   }
 
   /**
-   * Refresh access token using a refresh token.
+   * Refresh access token using a refresh token (single-use, rotated).
+   *
+   * Presenting a token that was already rotated is treated as theft and
+   * revokes the whole family — except within a short grace window while the
+   * family still has a live successor: that is two tabs refreshing on the same
+   * cookie at once, not an attacker.
    */
   async refresh(refreshToken: string) {
     const tokenHash = this.hashToken(refreshToken);
+    const now = new Date();
 
     const stored = await this.prisma.refreshToken.findFirst({
-      where: { tokenHash, revokedAt: null },
+      where: { tokenHash },
       include: { user: { include: { tenant: true } } },
     });
 
-    if (!stored || stored.expiresAt < new Date()) {
-      // If token was already used (reuse detection), revoke the entire family
-      if (stored) {
-        await this.prisma.refreshToken.updateMany({
-          where: { familyId: stored.familyId },
-          data: { revokedAt: new Date() },
-        });
-      }
+    if (!stored) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    // Revoke old token
-    await this.prisma.refreshToken.update({
-      where: { id: stored.id },
-      data: { revokedAt: new Date() },
-    });
+    const revokeFamily = () =>
+      this.prisma.refreshToken.updateMany({
+        where: { familyId: stored.familyId, revokedAt: null },
+        data: { revokedAt: now },
+      });
+
+    // The account may have been deleted/locked (or the tenant removed) since
+    // the token was issued: don't keep minting sessions for it.
+    const user = stored.user;
+    if (
+      user.deletedAt ||
+      (user.lockedUntil && user.lockedUntil > now) ||
+      user.tenant.deletedAt
+    ) {
+      await revokeFamily();
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    if (stored.expiresAt < now) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    let rotated = false;
+    if (!stored.revokedAt) {
+      // Atomic claim: only one concurrent request can rotate this token.
+      const claim = await this.prisma.refreshToken.updateMany({
+        where: { id: stored.id, revokedAt: null },
+        data: { revokedAt: now },
+      });
+      rotated = claim.count === 1;
+    }
+
+    if (!rotated) {
+      const revokedAt = stored.revokedAt ?? now;
+      const withinGrace =
+        now.getTime() - revokedAt.getTime() <= REFRESH_REUSE_GRACE_MS;
+      const liveSuccessor =
+        withinGrace &&
+        (await this.prisma.refreshToken.findFirst({
+          where: {
+            familyId: stored.familyId,
+            revokedAt: null,
+            expiresAt: { gt: now },
+          },
+          select: { id: true },
+        }));
+
+      if (!liveSuccessor) {
+        this.logger.warn(
+          `Refresh token reuse detected for user ${user.id}; revoking family`,
+        );
+        await revokeFamily();
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+    }
 
     // Generate new pair with same family
     const tokens = await this.generateTokens(
-      stored.user.id,
-      stored.user.tenantId,
-      stored.user.role,
+      user.id,
+      user.tenantId,
+      user.role,
       stored.familyId,
     );
 
     return {
       user: {
-        id: stored.user.id,
-        email: stored.user.email,
-        firstName: stored.user.firstName,
-        lastName: stored.user.lastName,
-        role: stored.user.role,
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
       },
       tenant: {
-        id: stored.user.tenant.id,
-        name: stored.user.tenant.name,
-        slug: stored.user.tenant.slug,
-        timezone: stored.user.tenant.timezone,
+        id: user.tenant.id,
+        name: user.tenant.name,
+        slug: user.tenant.slug,
+        timezone: user.tenant.timezone,
       },
       ...tokens,
     };
   }
 
   /**
-   * Revoke a refresh token (logout).
+   * Logout: revoke the whole session (token family), so a token rotated
+   * moments earlier cannot be replayed within the reuse grace window.
    */
   async logout(refreshToken: string) {
     const tokenHash = this.hashToken(refreshToken);
 
+    const stored = await this.prisma.refreshToken.findFirst({
+      where: { tokenHash },
+      select: { familyId: true },
+    });
+    if (!stored) return;
+
     await this.prisma.refreshToken.updateMany({
-      where: { tokenHash, revokedAt: null },
+      where: { familyId: stored.familyId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
   }

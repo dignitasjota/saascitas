@@ -293,7 +293,16 @@ describe('AuthService', () => {
 
   // ── refresh ─────────────────────────────────────────────────────────────────
   describe('refresh', () => {
-    it('throws UnauthorizedException when token not found', async () => {
+    const storedToken = (overrides = {}) => ({
+      id: 'rt-1',
+      familyId: 'family-1',
+      expiresAt: new Date(Date.now() + 60_000),
+      revokedAt: null,
+      user: mockUser(),
+      ...overrides,
+    });
+
+    it('throws UnauthorizedException when token is not found', async () => {
       mockPrisma.refreshToken.findFirst.mockResolvedValue(null);
 
       await expect(service.refresh('invalid-token')).rejects.toThrow(
@@ -301,75 +310,117 @@ describe('AuthService', () => {
       );
     });
 
+    it('looks the token up regardless of revocation (so reuse is detectable)', async () => {
+      mockPrisma.refreshToken.findFirst.mockResolvedValue(null);
+      await expect(service.refresh('t')).rejects.toThrow(UnauthorizedException);
+      expect(mockPrisma.refreshToken.findFirst.mock.calls[0][0].where).not.toHaveProperty(
+        'revokedAt',
+      );
+    });
+
     it('throws UnauthorizedException when token is expired', async () => {
-      mockPrisma.refreshToken.findFirst.mockResolvedValue({
-        id: 'rt-1',
-        familyId: 'family-1',
-        expiresAt: new Date(Date.now() - 1000), // expired
-        user: mockUser(),
-      });
+      mockPrisma.refreshToken.findFirst.mockResolvedValue(
+        storedToken({ expiresAt: new Date(Date.now() - 1000) }),
+      );
 
       await expect(service.refresh('some-token')).rejects.toThrow(
         UnauthorizedException,
       );
     });
 
-    it('revokes old token and issues new pair on valid refresh', async () => {
-      mockPrisma.refreshToken.findFirst.mockResolvedValue({
-        id: 'rt-1',
-        familyId: 'family-1',
-        expiresAt: new Date(Date.now() + 60_000),
-        user: mockUser(),
-      });
-      mockPrisma.refreshToken.update.mockResolvedValue({});
+    it('atomically revokes the old token and issues a new pair', async () => {
+      mockPrisma.refreshToken.findFirst.mockResolvedValue(storedToken());
+      mockPrisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await service.refresh('valid-raw-token');
 
-      expect(mockPrisma.refreshToken.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { revokedAt: expect.any(Date) } }),
+      expect(mockPrisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { id: 'rt-1', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+      expect(mockPrisma.refreshToken.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ familyId: 'family-1' }),
+        }),
       );
       expect(result.accessToken).toBe('access.token.jwt');
       expect(result.refreshToken).toBeDefined();
     });
 
-    it('revokes entire family when a used token is replayed', async () => {
-      // Token exists but has already expired (simulates reuse)
-      mockPrisma.refreshToken.findFirst.mockResolvedValue({
-        id: 'rt-old',
-        familyId: 'family-1',
-        expiresAt: new Date(Date.now() - 1000),
-        user: mockUser(),
-      });
-      mockPrisma.refreshToken.updateMany.mockResolvedValue({ count: 2 });
+    it('revokes the entire family when an already-rotated token is replayed', async () => {
+      mockPrisma.refreshToken.findFirst.mockResolvedValue(
+        storedToken({ revokedAt: new Date(Date.now() - 60 * 60 * 1000) }),
+      );
+      mockPrisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
 
       await expect(service.refresh('replayed-token')).rejects.toThrow(
         UnauthorizedException,
       );
+      expect(mockPrisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { familyId: 'family-1', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+      expect(mockPrisma.refreshToken.create).not.toHaveBeenCalled();
+    });
+
+    it('tolerates a concurrent refresh from another tab within the grace window', async () => {
+      mockPrisma.refreshToken.findFirst
+        .mockResolvedValueOnce(storedToken({ revokedAt: new Date(Date.now() - 2000) }))
+        .mockResolvedValueOnce({ id: 'rt-2' }); // live successor in the family
+
+      const result = await service.refresh('just-rotated-token');
+
+      expect(result.refreshToken).toBeDefined();
+      expect(mockPrisma.refreshToken.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('treats a recent reuse as theft when the family has no live token (e.g. after logout)', async () => {
+      mockPrisma.refreshToken.findFirst
+        .mockResolvedValueOnce(storedToken({ revokedAt: new Date(Date.now() - 2000) }))
+        .mockResolvedValueOnce(null);
+      mockPrisma.refreshToken.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.refresh('t')).rejects.toThrow(UnauthorizedException);
+      expect(mockPrisma.refreshToken.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['deleted user', { user: mockUser({ deletedAt: new Date() }) }],
+      ['locked user', { user: mockUser({ lockedUntil: new Date(Date.now() + 60_000) }) }],
+      [
+        'deleted tenant',
+        { user: mockUser({ tenant: { id: 'tenant-1', name: 'x', slug: 'x', deletedAt: new Date() } }) },
+      ],
+    ])('refuses to refresh for a %s and revokes the family', async (_label, overrides) => {
+      mockPrisma.refreshToken.findFirst.mockResolvedValue(storedToken(overrides));
+      mockPrisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(service.refresh('t')).rejects.toThrow(UnauthorizedException);
       expect(mockPrisma.refreshToken.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { familyId: 'family-1' },
-        }),
+        expect.objectContaining({ where: { familyId: 'family-1', revokedAt: null } }),
       );
+      expect(mockPrisma.refreshToken.create).not.toHaveBeenCalled();
     });
   });
 
   // ── logout ──────────────────────────────────────────────────────────────────
   describe('logout', () => {
-    it('revokes the refresh token', async () => {
+    it('revokes the whole token family', async () => {
+      mockPrisma.refreshToken.findFirst.mockResolvedValue({ familyId: 'family-1' });
       mockPrisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
 
       await service.logout('some-refresh-token');
 
-      expect(mockPrisma.refreshToken.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: { revokedAt: expect.any(Date) },
-        }),
-      );
+      expect(mockPrisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { familyId: 'family-1', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
     });
 
     it('does not throw when token is not found (idempotent)', async () => {
-      mockPrisma.refreshToken.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.refreshToken.findFirst.mockResolvedValue(null);
       await expect(service.logout('unknown-token')).resolves.not.toThrow();
+      expect(mockPrisma.refreshToken.updateMany).not.toHaveBeenCalled();
     });
   });
 
