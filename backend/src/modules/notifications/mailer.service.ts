@@ -51,7 +51,7 @@ export class MailerService implements OnModuleInit {
 
   async sendMail({ to, subject, template, context }: SendMailOptions) {
     const html = this.renderTemplate(template, context);
-    const from = this.config.get('MAIL_FROM', 'noreply@saascitas.local');
+    const from = this.config.get('MAIL_FROM', 'noreply@rutapro.es');
 
     try {
       const info = await this.transporter.sendMail({ from, to, subject, html });
