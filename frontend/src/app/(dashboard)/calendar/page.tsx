@@ -3,7 +3,6 @@
 import { useState, useMemo } from 'react'
 import {
   format, startOfWeek, addDays, addWeeks, subWeeks,
-  isSameDay, parseISO, startOfDay, endOfDay,
 } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { ChevronLeft, ChevronRight, Plus, CalendarDays } from 'lucide-react'
@@ -17,13 +16,27 @@ import { useEmployees } from '@/hooks/use-employees'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { formatTime } from '@/lib/utils'
+import {
+  formatTime,
+  dateKeyInTimezone,
+  hourOfDayInTimezone,
+  todayInTimezone,
+  zonedWallTimeToUtc,
+} from '@/lib/utils'
+import { useTenantTimezone } from '@/hooks/use-tenant'
 import type { Appointment } from '@/types/api'
 
 // Default visible window; the grid expands beyond it if any appointment falls
 // earlier or later, so nothing gets clamped or clipped.
 const DEFAULT_START = 7
 const DEFAULT_END = 21
+
+/** End hour on the appointment's start day; 24 if it runs past midnight. */
+function endHourOnStartDay(appt: Appointment, tz: string): number {
+  return dateKeyInTimezone(appt.endsAt, tz) !== dateKeyInTimezone(appt.startsAt, tz)
+    ? 24
+    : hourOfDayInTimezone(appt.endsAt, tz)
+}
 
 export default function CalendarPage() {
   const [weekStart, setWeekStart] = useState(() =>
@@ -33,26 +46,29 @@ export default function CalendarPage() {
   const [showNew, setShowNew] = useState(false)
   const [selectedDate, setSelectedDate] = useState<string>('')
   const [selectedAppt, setSelectedAppt] = useState<Appointment | null>(null)
+  const tz = useTenantTimezone()
 
   const weekEnd = addDays(weekStart, 6)
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
 
   const { data: employees = [] } = useEmployees()
+  // The week's days are civil dates; fetch them as the business's days (tenant
+  // timezone), not the browser's.
   const { data: appointments = [], isLoading, isError, refetch } = useCalendar(
-    weekStart.toISOString(),
-    endOfDay(weekEnd).toISOString(),
+    zonedWallTimeToUtc(format(weekStart, 'yyyy-MM-dd'), '00:00', tz).toISOString(),
+    zonedWallTimeToUtc(format(addDays(weekEnd, 1), 'yyyy-MM-dd'), '00:00', tz).toISOString(),
     selectedEmployeeId !== 'all' ? selectedEmployeeId : undefined,
   )
 
   const apptsByDay = useMemo(() => {
     const map: Record<string, Appointment[]> = {}
     for (const appt of appointments) {
-      const key = format(parseISO(appt.startsAt), 'yyyy-MM-dd')
+      const key = dateKeyInTimezone(appt.startsAt, tz)
       if (!map[key]) map[key] = []
       map[key].push(appt)
     }
     return map
-  }, [appointments])
+  }, [appointments, tz])
 
   // Expand the hour range to fit every appointment (early-morning or late-night
   // bookings no longer get clamped to the 7–21 default or clipped off the grid).
@@ -60,10 +76,8 @@ export default function CalendarPage() {
     let start = DEFAULT_START
     let end = DEFAULT_END
     for (const appt of appointments) {
-      const s = parseISO(appt.startsAt)
-      const e = parseISO(appt.endsAt)
-      const startH = s.getHours()
-      const endH = e.getHours() + (e.getMinutes() > 0 || e.getSeconds() > 0 ? 1 : 0)
+      const startH = Math.floor(hourOfDayInTimezone(appt.startsAt, tz))
+      const endH = Math.ceil(endHourOnStartDay(appt, tz))
       if (startH < start) start = startH
       if (endH > end) end = Math.min(24, endH)
     }
@@ -71,7 +85,7 @@ export default function CalendarPage() {
       hourStart: start,
       hours: Array.from({ length: end - start }, (_, i) => i + start),
     }
-  }, [appointments])
+  }, [appointments, tz])
 
   const goToToday = () => setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))
 
@@ -128,7 +142,7 @@ export default function CalendarPage() {
           {/* Time gutter */}
           <div className="p-2 border-r" />
           {days.map(day => {
-            const isToday = isSameDay(day, new Date())
+            const isToday = format(day, 'yyyy-MM-dd') === todayInTimezone(tz)
             return (
               <div key={day.toISOString()} className="p-2 text-center border-r last:border-r-0">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">
@@ -192,10 +206,8 @@ export default function CalendarPage() {
 
                   {/* Appointments */}
                   {dayAppts.map(appt => {
-                    const start = parseISO(appt.startsAt)
-                    const end = parseISO(appt.endsAt)
-                    const startH = start.getHours() + start.getMinutes() / 60
-                    const endH = end.getHours() + end.getMinutes() / 60
+                    const startH = hourOfDayInTimezone(appt.startsAt, tz)
+                    const endH = endHourOnStartDay(appt, tz)
                     const top = Math.max(0, (startH - hourStart) * 64)
                     const height = Math.max(24, (endH - startH) * 64 - 2)
                     const name = `${appt.customer?.firstName ?? ''} ${appt.customer?.lastName ?? ''}`.trim()
@@ -204,7 +216,7 @@ export default function CalendarPage() {
                       <button
                         key={appt.id}
                         type="button"
-                        aria-label={`Cita de ${name} a las ${formatTime(appt.startsAt)}. Ver detalles`}
+                        aria-label={`Cita de ${name} a las ${formatTime(appt.startsAt, tz)}. Ver detalles`}
                         className="absolute left-0.5 right-0.5 rounded px-1.5 py-1 text-white text-xs text-left overflow-hidden cursor-pointer hover:opacity-90 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
                         style={{
                           top,
@@ -218,7 +230,7 @@ export default function CalendarPage() {
                         </p>
                         {height > 40 && (
                           <p className="truncate opacity-90">
-                            {formatTime(appt.startsAt)} · {appt.service?.name ?? `${appt.durationMinutes}min`}
+                            {formatTime(appt.startsAt, tz)} · {appt.service?.name ?? `${appt.durationMinutes}min`}
                           </p>
                         )}
                       </button>
@@ -237,7 +249,7 @@ export default function CalendarPage() {
       <NewAppointmentDialog
         open={showNew}
         onClose={() => setShowNew(false)}
-        defaultDate={selectedDate || new Date().toISOString().split('T')[0]}
+        defaultDate={selectedDate || todayInTimezone(tz)}
         defaultEmployeeId={selectedEmployeeId !== 'all' ? selectedEmployeeId : undefined}
       />
     </div>
