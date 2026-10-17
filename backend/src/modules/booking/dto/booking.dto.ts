@@ -47,3 +47,10 @@ export class CreateBookingDto {
   @MaxLength(500)
   notes?: string;
 }
+
+export class CancelBookingDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}

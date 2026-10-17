@@ -9,7 +9,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { BookingService } from './booking.service';
-import { CreateBookingDto } from './dto/booking.dto';
+import { CancelBookingDto, CreateBookingDto } from './dto/booking.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { Throttle } from '@nestjs/throttler';
 
@@ -76,9 +76,9 @@ export class BookingController {
   @HttpCode(HttpStatus.OK)
   async cancelBooking(
     @Param('token') token: string,
-    @Body('reason') reason?: string,
+    @Body() dto: CancelBookingDto,
   ) {
-    const data = await this.bookingService.cancelBooking(token, reason);
+    const data = await this.bookingService.cancelBooking(token, dto.reason);
     return { data };
   }
 }

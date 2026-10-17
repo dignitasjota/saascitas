@@ -62,7 +62,7 @@ export class NotificationsProcessor extends WorkerHost {
       where: { appointmentId, action: 'confirm', usedAt: null },
     });
 
-    const apiUrl = process.env.APP_URL ?? 'http://localhost:3001';
+    const frontendUrl = this.frontendUrl();
 
     await this.mailer.sendMail({
       to: email,
@@ -79,10 +79,10 @@ export class NotificationsProcessor extends WorkerHost {
         duration: appt.durationMinutes,
         price: appt.priceCents ? formatPrice(appt.priceCents) : null,
         confirmUrl: confirmToken
-          ? `${apiUrl}/v1/booking/confirm/${confirmToken.token}`
+          ? `${frontendUrl}/cita/confirmar/${confirmToken.token}`
           : null,
         cancelUrl: cancelToken
-          ? `${apiUrl}/v1/booking/cancel/${cancelToken.token}`
+          ? `${frontendUrl}/cita/cancelar/${cancelToken.token}`
           : null,
       },
     });
@@ -121,7 +121,7 @@ export class NotificationsProcessor extends WorkerHost {
       where: { appointmentId, action: 'cancel', usedAt: null },
     });
 
-    const apiUrl = process.env.APP_URL ?? 'http://localhost:3001';
+    const frontendUrl = this.frontendUrl();
 
     await this.mailer.sendMail({
       to: email,
@@ -138,7 +138,7 @@ export class NotificationsProcessor extends WorkerHost {
         duration: appt.durationMinutes,
         price: appt.priceCents ? formatPrice(appt.priceCents) : null,
         cancelUrl: cancelToken
-          ? `${apiUrl}/v1/booking/cancel/${cancelToken.token}`
+          ? `${frontendUrl}/cita/cancelar/${cancelToken.token}`
           : null,
       },
     });
@@ -146,6 +146,14 @@ export class NotificationsProcessor extends WorkerHost {
     const reminderSubject = `Recordatorio: tu cita es mañana — ${appt.tenant.name}`;
     await this.recordNotification(appointmentId, 'booking_reminder', email, reminderSubject);
     this.logger.log(`Reminder email sent to ${email} for appointment ${appointmentId}`);
+  }
+
+  /**
+   * Email links open frontend pages (/cita/...), which POST to the API. The
+   * API actions are POST-only, so linking straight to them would 404.
+   */
+  private frontendUrl(): string {
+    return (process.env.FRONTEND_URL ?? 'http://localhost:3000').replace(/\/$/, '');
   }
 
   private async loadAppointment(appointmentId: string) {

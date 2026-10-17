@@ -18,7 +18,11 @@ const PUBLIC_PATHS = new Set([
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
-  if (PUBLIC_PATHS.has(pathname) || pathname.startsWith('/book/')) {
+  if (
+    PUBLIC_PATHS.has(pathname) ||
+    pathname.startsWith('/book/') ||
+    pathname.startsWith('/cita/') // confirm/cancel links from booking emails
+  ) {
     return NextResponse.next()
   }
 
