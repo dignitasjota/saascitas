@@ -99,3 +99,18 @@ export function formatDateInTz(date: Date, timeZone: string): string {
     day: '2-digit',
   }).format(date);
 }
+
+/** Add `days` (may be negative) to a civil date "YYYY-MM-DD". */
+export function addCivilDays(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Add `months` (may be negative) to a civil month "YYYY-MM". */
+export function addCivilMonths(monthStr: string, months: number): string {
+  const [y, m] = monthStr.split('-').map(Number);
+  const date = new Date(Date.UTC(y, m - 1 + months, 1));
+  return date.toISOString().slice(0, 7);
+}

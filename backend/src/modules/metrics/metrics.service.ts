@@ -1,6 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { startOfDay, endOfDay, startOfMonth, endOfMonth, subMonths, subDays, format } from 'date-fns';
+import { subDays } from 'date-fns';
+import {
+  addCivilDays,
+  addCivilMonths,
+  endOfDayUtc,
+  formatDateInTz,
+  startOfDayUtc,
+  todayInTz,
+} from '../../common/utils/timezone';
+
+const DEFAULT_TZ = 'Europe/Madrid';
 
 @Injectable()
 export class MetricsService {
@@ -62,32 +72,26 @@ export class MetricsService {
   }
 
   /**
-   * Revenue chart: daily revenue for the last N days.
+   * Revenue chart: daily revenue for the last N days. Days are the business's
+   * civil days (tenant timezone), not the server's (UTC in Docker).
    */
   async getRevenueChart(tenantId: string, days = 30) {
-    const now = new Date();
-    const from = subDays(now, days - 1);
+    const { tz, dayKeys, from, to } = await this.dayWindow(tenantId, days);
 
     const rows = await this.prisma.appointment.findMany({
       where: {
         tenantId,
         status: 'completed',
-        startsAt: { gte: startOfDay(from), lte: endOfDay(now) },
+        startsAt: { gte: from, lt: to },
         priceCents: { not: null },
       },
       select: { startsAt: true, priceCents: true },
       orderBy: { startsAt: 'asc' },
     });
 
-    // Build a map of date → revenue
-    const revenueByDay = new Map<string, number>();
-    for (let i = 0; i < days; i++) {
-      const d = subDays(now, days - 1 - i);
-      revenueByDay.set(format(d, 'yyyy-MM-dd'), 0);
-    }
-
+    const revenueByDay = new Map<string, number>(dayKeys.map((k) => [k, 0]));
     for (const row of rows) {
-      const key = format(row.startsAt, 'yyyy-MM-dd');
+      const key = formatDateInTz(row.startsAt, tz);
       if (revenueByDay.has(key)) {
         revenueByDay.set(key, (revenueByDay.get(key) ?? 0) + (row.priceCents ?? 0));
       }
@@ -103,29 +107,25 @@ export class MetricsService {
    * Appointments chart: daily counts by status for the last N days.
    */
   async getAppointmentsChart(tenantId: string, days = 30) {
-    const now = new Date();
-    const from = subDays(now, days - 1);
+    const { tz, dayKeys, from, to } = await this.dayWindow(tenantId, days);
 
     const rows = await this.prisma.appointment.findMany({
       where: {
         tenantId,
-        startsAt: { gte: startOfDay(from), lte: endOfDay(now) },
+        startsAt: { gte: from, lt: to },
         status: { notIn: ['cancelled', 'no_show'] },
       },
       select: { startsAt: true, status: true },
       orderBy: { startsAt: 'asc' },
     });
 
-    const byDay = new Map<string, { completed: number; confirmed: number; pending: number }>();
-    for (let i = 0; i < days; i++) {
-      const d = subDays(now, days - 1 - i);
-      byDay.set(format(d, 'yyyy-MM-dd'), { completed: 0, confirmed: 0, pending: 0 });
-    }
+    const byDay = new Map<string, { completed: number; confirmed: number; pending: number }>(
+      dayKeys.map((k) => [k, { completed: 0, confirmed: 0, pending: 0 }]),
+    );
 
     for (const row of rows) {
-      const key = format(row.startsAt, 'yyyy-MM-dd');
-      if (!byDay.has(key)) continue;
-      const entry = byDay.get(key)!;
+      const entry = byDay.get(formatDateInTz(row.startsAt, tz));
+      if (!entry) continue;
       if (row.status === 'completed') entry.completed++;
       else if (row.status === 'confirmed') entry.confirmed++;
       else if (row.status === 'pending') entry.pending++;
@@ -138,24 +138,47 @@ export class MetricsService {
   }
 
   /**
-   * Monthly breakdown for the last 6 months.
+   * Monthly breakdown for the last 6 months (calendar months in the tenant
+   * timezone, half-open [first instant of month, first instant of next)).
    */
   async getMonthlyBreakdown(tenantId: string) {
-    const now = new Date();
+    const tz = await this.getTenantTz(tenantId);
+    const currentMonth = todayInTz(tz).slice(0, 7);
 
-    const months = await Promise.all(
+    return Promise.all(
       Array.from({ length: 6 }, (_, i) => {
-        const monthDate = subMonths(now, 5 - i);
-        const from = startOfMonth(monthDate);
-        const to = endOfMonth(monthDate);
-        return this.getMonthStats(tenantId, from, to, format(monthDate, 'yyyy-MM'));
+        const month = addCivilMonths(currentMonth, i - 5);
+        const from = startOfDayUtc(`${month}-01`, tz);
+        const to = startOfDayUtc(`${addCivilMonths(month, 1)}-01`, tz);
+        return this.getMonthStats(tenantId, from, to, month);
       }),
     );
-
-    return months;
   }
 
   // ─── Private helpers ─────────────────────────────────────────────────────────
+
+  private async getTenantTz(tenantId: string): Promise<string> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { timezone: true },
+    });
+    return tenant?.timezone ?? DEFAULT_TZ;
+  }
+
+  /** The last `days` civil days (ending today) in the tenant tz, as a UTC range. */
+  private async dayWindow(tenantId: string, days: number) {
+    const tz = await this.getTenantTz(tenantId);
+    const today = todayInTz(tz);
+    const dayKeys = Array.from({ length: days }, (_, i) =>
+      addCivilDays(today, i - (days - 1)),
+    );
+    return {
+      tz,
+      dayKeys,
+      from: startOfDayUtc(dayKeys[0], tz),
+      to: endOfDayUtc(today, tz),
+    };
+  }
 
   private async getPeriodStats(tenantId: string, from: Date, to: Date) {
     // Half-open range [from, to): the boundary instant (subDays(now, 30) is both
@@ -209,7 +232,7 @@ export class MetricsService {
       where: {
         tenantId,
         status: 'completed',
-        startsAt: { gte: from, lte: to },
+        startsAt: { gte: from, lt: to },
         serviceId: { not: null },
       },
       _count: { _all: true },
@@ -271,12 +294,12 @@ export class MetricsService {
     const [appointments, newCustomers] = await Promise.all([
       this.prisma.appointment.groupBy({
         by: ['status'],
-        where: { tenantId, startsAt: { gte: from, lte: to } },
+        where: { tenantId, startsAt: { gte: from, lt: to } },
         _count: { _all: true },
         _sum: { priceCents: true },
       }),
       this.prisma.customer.count({
-        where: { tenantId, createdAt: { gte: from, lte: to }, deletedAt: null },
+        where: { tenantId, createdAt: { gte: from, lt: to }, deletedAt: null },
       }),
     ]);
 
