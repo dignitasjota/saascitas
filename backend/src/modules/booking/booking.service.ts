@@ -302,12 +302,16 @@ export class BookingService {
           },
         });
 
-        // Update customer stats
+        // Update customer stats. An existing customer's email is only filled
+        // in when missing — never overwritten from an anonymous public form,
+        // or anyone knowing a phone number could redirect that customer's
+        // booking emails to themselves.
         await tx.customer.update({
           where: { id: customer!.id },
           data: {
             totalAppointments: { increment: 1 },
             lastAppointmentAt: startsAt,
+            ...(!customer!.email && dto.email && { email: dto.email }),
           },
         });
 
@@ -341,7 +345,10 @@ export class BookingService {
       endsAt: result.appointment.endsAt,
       service: { name: service.name, durationMinutes: service.durationMinutes, priceCents: service.priceCents },
       employee: { firstName: employee.firstName, lastName: employee.lastName },
-      customer: { firstName: customer.firstName, lastName: customer.lastName, phone: customer.phone },
+      // Echo what the visitor typed, never the stored customer record: the
+      // customer is matched by phone, so returning it would reveal the real
+      // name behind any phone number to an anonymous caller.
+      customer: { firstName: dto.firstName, lastName: dto.lastName, phone: dto.phone },
       cancelToken: result.cancelToken,
     };
   }

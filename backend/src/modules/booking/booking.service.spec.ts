@@ -304,6 +304,61 @@ describe('BookingService', () => {
       expect(mockPrisma.customer.create).not.toHaveBeenCalled();
     });
 
+    it('never reveals the stored customer behind a phone number', async () => {
+      mockPrisma.customer.findFirst.mockResolvedValue({
+        id: 'existing-cust',
+        firstName: 'Nombre',
+        lastName: 'Real',
+        phone: CUSTOMER_INPUT.phone,
+        email: 'real@example.com',
+      });
+      const txCustomerUpdate = jest.fn().mockResolvedValue({});
+      mockPrisma.$transaction.mockImplementation(async (fn: any) =>
+        fn({
+          appointment: {
+            create: jest.fn().mockResolvedValue({ id: 'a', status: 'pending' }),
+          },
+          bookingToken: { create: jest.fn().mockResolvedValue({}) },
+          customer: { update: txCustomerUpdate },
+        }),
+      );
+
+      const result = await service.createBooking(
+        TENANT.slug,
+        makeDto({ firstName: 'Intruso', lastName: 'X', email: 'attacker@example.com' }),
+      );
+
+      expect(result.customer).toEqual({
+        firstName: 'Intruso',
+        lastName: 'X',
+        phone: CUSTOMER_INPUT.phone,
+      });
+      // The stored email must not be replaced from the public form.
+      expect(txCustomerUpdate.mock.calls[0][0].data).not.toHaveProperty('email');
+    });
+
+    it('fills in a missing email on an existing customer', async () => {
+      mockPrisma.customer.findFirst.mockResolvedValue({
+        id: 'existing-cust',
+        ...CUSTOMER_INPUT,
+        email: null,
+      });
+      const txCustomerUpdate = jest.fn().mockResolvedValue({});
+      mockPrisma.$transaction.mockImplementation(async (fn: any) =>
+        fn({
+          appointment: {
+            create: jest.fn().mockResolvedValue({ id: 'a', status: 'pending' }),
+          },
+          bookingToken: { create: jest.fn().mockResolvedValue({}) },
+          customer: { update: txCustomerUpdate },
+        }),
+      );
+
+      await service.createBooking(TENANT.slug, makeDto());
+
+      expect(txCustomerUpdate.mock.calls[0][0].data.email).toBe(CUSTOMER_INPUT.email);
+    });
+
     it('queues confirmation and reminder notifications', async () => {
       mockTransaction('new-appt');
 
