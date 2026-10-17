@@ -7,15 +7,15 @@ import { DesktopSidebar, MobileSidebar } from '@/components/layout/sidebar'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
-  const { accessToken } = useAuthStore()
+  const { user } = useAuthStore()
 
   useEffect(() => {
-    if (!accessToken) {
+    if (!user) {
       router.replace('/login')
     }
-  }, [accessToken, router])
+  }, [user, router])
 
-  if (!accessToken) return null
+  if (!user) return null
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">

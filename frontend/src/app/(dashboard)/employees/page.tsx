@@ -5,7 +5,10 @@ import { Plus, UserCog } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useEmployees, useCreateEmployee } from '@/hooks/use-employees'
+import { ErrorState } from '@/components/ui/error-state'
+import { useEmployees, useCreateEmployee, useSetEmployeeServices, useUpdateEmployee } from '@/hooks/use-employees'
+import { useServices } from '@/hooks/use-services'
+import type { Employee } from '@/types/api'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -28,7 +31,11 @@ const COLORS = ['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899','#14
 
 export default function EmployeesPage() {
   const [showNew, setShowNew] = useState(false)
-  const { data: employees = [], isLoading } = useEmployees()
+  const [editingServices, setEditingServices] = useState<Employee | null>(null)
+  const { data: employees = [], isLoading, isError, refetch } = useEmployees()
+  const { data: services = [] } = useServices()
+  const serviceName = new Map(services.map(s => [s.id, s.name]))
+  const updateEmployee = useUpdateEmployee()
 
   return (
     <div className="space-y-5">
@@ -45,7 +52,11 @@ export default function EmployeesPage() {
         </div>
       )}
 
-      {!isLoading && employees.length === 0 && (
+      {isError && (
+        <ErrorState message="No se pudieron cargar los empleados" onRetry={() => refetch()} />
+      )}
+
+      {!isLoading && !isError && employees.length === 0 && (
         <div className="rounded-lg border border-dashed p-10 text-center">
           <UserCog className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
           <p className="text-sm font-medium">No hay empleados</p>
@@ -81,11 +92,37 @@ export default function EmployeesPage() {
                 ))}
               </div>
             )}
+            <div className="flex items-start justify-between gap-2 border-t pt-3">
+              <p className="text-xs text-muted-foreground">
+                {(e.employeeServices?.length ?? 0) === 0
+                  ? 'No ofrece ningún servicio (no aparece en la reserva online)'
+                  : e.employeeServices!
+                      .map(es => serviceName.get(es.serviceId))
+                      .filter(Boolean)
+                      .join(' · ')}
+              </p>
+              <div className="flex shrink-0 gap-2">
+                <Button size="sm" variant="outline" onClick={() => setEditingServices(e)}>
+                  Servicios
+                </Button>
+                {/* Inactive employees keep their data and booked appointments but
+                    receive no new bookings. Reactivating respects the plan limit. */}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={updateEmployee.isPending}
+                  onClick={() => updateEmployee.mutate({ id: e.id, data: { isActive: !e.isActive } })}
+                >
+                  {e.isActive ? 'Desactivar' : 'Activar'}
+                </Button>
+              </div>
+            </div>
           </div>
         ))}
       </div>
 
       <NewEmployeeDialog open={showNew} onClose={() => setShowNew(false)} />
+      <EmployeeServicesDialog employee={editingServices} onClose={() => setEditingServices(null)} />
     </div>
   )
 }
@@ -111,23 +148,23 @@ function NewEmployeeDialog({ open, onClose }: { open: boolean; onClose: () => vo
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Nombre *</Label>
-              <Input {...register('firstName')} />
+              <Label htmlFor="firstName">Nombre *</Label>
+              <Input id="firstName" {...register('firstName')} />
               {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
             </div>
             <div className="space-y-1.5">
-              <Label>Apellido *</Label>
-              <Input {...register('lastName')} />
+              <Label htmlFor="lastName">Apellido *</Label>
+              <Input id="lastName" {...register('lastName')} />
               {errors.lastName && <p className="text-xs text-destructive">{errors.lastName.message}</p>}
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label>Email</Label>
-            <Input type="email" {...register('email')} />
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" type="email" {...register('email')} />
           </div>
           <div className="space-y-1.5">
-            <Label>Teléfono</Label>
-            <Input type="tel" {...register('phone')} />
+            <Label htmlFor="phone">Teléfono</Label>
+            <Input id="phone" type="tel" {...register('phone')} />
           </div>
           <div className="space-y-1.5">
             <Label>Color en la agenda</Label>
@@ -150,6 +187,76 @@ function NewEmployeeDialog({ open, onClose }: { open: boolean; onClose: () => vo
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function EmployeeServicesDialog({ employee, onClose }: { employee: Employee | null; onClose: () => void }) {
+  const { data: services = [] } = useServices()
+  const setServices = useSetEmployeeServices()
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [seededFor, setSeededFor] = useState<string | null>(null)
+
+  // Re-seed the selection whenever a different employee is opened.
+  if (employee && seededFor !== employee.id) {
+    setSeededFor(employee.id)
+    setSelected(new Set(employee.employeeServices?.map(es => es.serviceId) ?? []))
+  }
+
+  const toggle = (id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const onSave = async () => {
+    if (!employee) return
+    await setServices.mutateAsync({ id: employee.id, serviceIds: [...selected] })
+    setSeededFor(null)
+    onClose()
+  }
+
+  const close = () => {
+    setSeededFor(null)
+    onClose()
+  }
+
+  return (
+    <Dialog open={!!employee} onOpenChange={v => !v && close()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            Servicios de {employee?.firstName} {employee?.lastName}
+          </DialogTitle>
+        </DialogHeader>
+        {services.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Todavía no hay servicios creados.</p>
+        ) : (
+          <div className="space-y-2">
+            {services.map(s => (
+              <label key={s.id} className="flex items-center gap-3 rounded-md border p-2.5 cursor-pointer hover:bg-muted/40">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={selected.has(s.id)}
+                  onChange={() => toggle(s.id)}
+                />
+                <span className="text-sm">{s.name}</span>
+                <span className="ml-auto text-xs text-muted-foreground">{s.durationMinutes} min</span>
+              </label>
+            ))}
+          </div>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={close}>Cancelar</Button>
+          <Button type="button" onClick={onSave} disabled={setServices.isPending}>
+            {setServices.isPending ? 'Guardando...' : 'Guardar'}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

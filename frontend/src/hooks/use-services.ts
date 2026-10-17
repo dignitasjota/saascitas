@@ -24,6 +24,8 @@ export function useCreateService() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['services'] })
+      // The backend links new services to every active employee.
+      qc.invalidateQueries({ queryKey: ['employees'] })
       toast.success('Servicio creado')
     },
     onError: (error: any) => {
@@ -58,6 +60,9 @@ export function useDeleteService() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['services'] })
       toast.success('Servicio eliminado')
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.detail || 'Error al eliminar el servicio')
     },
   })
 }

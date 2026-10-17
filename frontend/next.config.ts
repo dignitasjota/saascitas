@@ -1,8 +1,13 @@
 import type { NextConfig } from 'next';
+import path from 'path';
 
 const nextConfig: NextConfig = {
   // Standalone output for Docker (smaller image, no node_modules copy)
   output: 'standalone',
+  // Pin the tracing root to this app so the standalone bundle has a predictable
+  // layout (server.js at the root) whether built inside the monorepo or from
+  // the isolated ./frontend Docker context.
+  outputFileTracingRoot: path.join(__dirname),
 
   // Proxy API requests to backend
   async rewrites() {

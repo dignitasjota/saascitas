@@ -1,24 +1,30 @@
 name: Deploy
 
+# Deploy only after the CI workflow (backend tests + frontend build) succeeds
+# on main. This prevents shipping a commit whose tests or build are broken.
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
-    tags: ["v*"]
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_TAG: ${{ github.sha }}
+  IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
 
 jobs:
   build-and-push:
     name: Build & push Docker images
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: read
       packages: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -62,9 +68,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
+        # Pinned by commit SHA (v1.2.5) — a mutable tag on a third-party action
+        # that receives the deploy SSH key is a supply-chain risk.
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -74,7 +84,7 @@ jobs:
 
             cd /srv/saascitas
 
-            # Pull latest compose files
+            # Pull latest compose / nginx files
             git pull origin main
 
             # Update image tag
@@ -84,8 +94,11 @@ jobs:
             # Pull new images
             docker compose -f docker-compose.prod.yml pull backend frontend
 
-            # Rolling restart (zero-downtime: new container starts before old stops)
+            # Rolling restart of app containers
             docker compose -f docker-compose.prod.yml up -d --no-deps backend frontend
+
+            # Reload nginx in case its config changed in this pull
+            docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload || true
 
             # Clean up old images
             docker image prune -f

@@ -3,25 +3,40 @@
 import { useState, useMemo } from 'react'
 import {
   format, startOfWeek, addDays, addWeeks, subWeeks,
-  isSameDay, parseISO, startOfDay, endOfDay,
 } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { ChevronLeft, ChevronRight, Plus, CalendarDays } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import { NewAppointmentDialog } from '@/components/appointments/new-appointment-dialog'
-import { StatusBadge } from '@/components/appointments/status-badge'
+import { AppointmentDetailDialog } from '@/components/appointments/appointment-detail-dialog'
 import { useCalendar } from '@/hooks/use-appointments'
 import { useEmployees } from '@/hooks/use-employees'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { formatTime, formatPrice } from '@/lib/utils'
+import {
+  formatTime,
+  dateKeyInTimezone,
+  hourOfDayInTimezone,
+  todayInTimezone,
+  zonedWallTimeToUtc,
+} from '@/lib/utils'
+import { useTenantTimezone } from '@/hooks/use-tenant'
 import type { Appointment } from '@/types/api'
 
-const HOUR_START = 7
-const HOUR_END = 21
-const HOURS = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => i + HOUR_START)
+// Default visible window; the grid expands beyond it if any appointment falls
+// earlier or later, so nothing gets clamped or clipped.
+const DEFAULT_START = 7
+const DEFAULT_END = 21
+
+/** End hour on the appointment's start day; 24 if it runs past midnight. */
+function endHourOnStartDay(appt: Appointment, tz: string): number {
+  return dateKeyInTimezone(appt.endsAt, tz) !== dateKeyInTimezone(appt.startsAt, tz)
+    ? 24
+    : hourOfDayInTimezone(appt.endsAt, tz)
+}
 
 export default function CalendarPage() {
   const [weekStart, setWeekStart] = useState(() =>
@@ -31,26 +46,46 @@ export default function CalendarPage() {
   const [showNew, setShowNew] = useState(false)
   const [selectedDate, setSelectedDate] = useState<string>('')
   const [selectedAppt, setSelectedAppt] = useState<Appointment | null>(null)
+  const tz = useTenantTimezone()
 
   const weekEnd = addDays(weekStart, 6)
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
 
   const { data: employees = [] } = useEmployees()
-  const { data: appointments = [], isLoading } = useCalendar(
-    weekStart.toISOString(),
-    endOfDay(weekEnd).toISOString(),
+  // The week's days are civil dates; fetch them as the business's days (tenant
+  // timezone), not the browser's.
+  const { data: appointments = [], isLoading, isError, refetch } = useCalendar(
+    zonedWallTimeToUtc(format(weekStart, 'yyyy-MM-dd'), '00:00', tz).toISOString(),
+    zonedWallTimeToUtc(format(addDays(weekEnd, 1), 'yyyy-MM-dd'), '00:00', tz).toISOString(),
     selectedEmployeeId !== 'all' ? selectedEmployeeId : undefined,
   )
 
   const apptsByDay = useMemo(() => {
     const map: Record<string, Appointment[]> = {}
     for (const appt of appointments) {
-      const key = format(parseISO(appt.startsAt), 'yyyy-MM-dd')
+      const key = dateKeyInTimezone(appt.startsAt, tz)
       if (!map[key]) map[key] = []
       map[key].push(appt)
     }
     return map
-  }, [appointments])
+  }, [appointments, tz])
+
+  // Expand the hour range to fit every appointment (early-morning or late-night
+  // bookings no longer get clamped to the 7–21 default or clipped off the grid).
+  const { hourStart, hours } = useMemo(() => {
+    let start = DEFAULT_START
+    let end = DEFAULT_END
+    for (const appt of appointments) {
+      const startH = Math.floor(hourOfDayInTimezone(appt.startsAt, tz))
+      const endH = Math.ceil(endHourOnStartDay(appt, tz))
+      if (startH < start) start = startH
+      if (endH > end) end = Math.min(24, endH)
+    }
+    return {
+      hourStart: start,
+      hours: Array.from({ length: end - start }, (_, i) => i + start),
+    }
+  }, [appointments, tz])
 
   const goToToday = () => setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))
 
@@ -107,7 +142,7 @@ export default function CalendarPage() {
           {/* Time gutter */}
           <div className="p-2 border-r" />
           {days.map(day => {
-            const isToday = isSameDay(day, new Date())
+            const isToday = format(day, 'yyyy-MM-dd') === todayInTimezone(tz)
             return (
               <div key={day.toISOString()} className="p-2 text-center border-r last:border-r-0">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">
@@ -130,11 +165,15 @@ export default function CalendarPage() {
           <div className="p-6 space-y-3">
             {[1,2,3,4,5].map(i => <Skeleton key={i} className="h-16 w-full" />)}
           </div>
+        ) : isError ? (
+          <div className="p-6">
+            <ErrorState message="No se pudo cargar el calendario" onRetry={() => refetch()} />
+          </div>
         ) : (
           <div className="grid grid-cols-8">
             {/* Hours column */}
             <div className="border-r">
-              {HOURS.map(h => (
+              {hours.map(h => (
                 <div key={h} className="h-16 border-b flex items-start pt-1 px-2">
                   <span className="text-xs text-muted-foreground tabular-nums">{h}:00</span>
                 </div>
@@ -146,45 +185,55 @@ export default function CalendarPage() {
               const dayKey = format(day, 'yyyy-MM-dd')
               const dayAppts = apptsByDay[dayKey] ?? []
 
+              const dayLabel = format(day, "EEEE d 'de' MMMM", { locale: es })
+
               return (
                 <div
                   key={dayKey}
                   className="border-r last:border-r-0 relative"
-                  onClick={() => handleCellClick(day)}
                 >
-                  {HOURS.map(h => (
-                    <div key={h} className="h-16 border-b hover:bg-muted/30 cursor-pointer" />
+                  {/* Empty hour cells are buttons so a new appointment can be
+                      created by mouse or keyboard. */}
+                  {hours.map(h => (
+                    <button
+                      key={h}
+                      type="button"
+                      onClick={() => handleCellClick(day)}
+                      aria-label={`Crear cita el ${dayLabel}`}
+                      className="block w-full h-16 border-b hover:bg-muted/30 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    />
                   ))}
 
                   {/* Appointments */}
                   {dayAppts.map(appt => {
-                    const start = parseISO(appt.startsAt)
-                    const end = parseISO(appt.endsAt)
-                    const startH = start.getHours() + start.getMinutes() / 60
-                    const endH = end.getHours() + end.getMinutes() / 60
-                    const top = Math.max(0, (startH - HOUR_START) * 64)
+                    const startH = hourOfDayInTimezone(appt.startsAt, tz)
+                    const endH = endHourOnStartDay(appt, tz)
+                    const top = Math.max(0, (startH - hourStart) * 64)
                     const height = Math.max(24, (endH - startH) * 64 - 2)
+                    const name = `${appt.customer?.firstName ?? ''} ${appt.customer?.lastName ?? ''}`.trim()
 
                     return (
-                      <div
+                      <button
                         key={appt.id}
-                        className="absolute left-0.5 right-0.5 rounded px-1.5 py-1 text-white text-xs overflow-hidden cursor-pointer hover:opacity-90 shadow-sm"
+                        type="button"
+                        aria-label={`Cita de ${name} a las ${formatTime(appt.startsAt, tz)}. Ver detalles`}
+                        className="absolute left-0.5 right-0.5 rounded px-1.5 py-1 text-white text-xs text-left overflow-hidden cursor-pointer hover:opacity-90 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
                         style={{
                           top,
                           height,
                           backgroundColor: appt.employee?.color ?? '#3B82F6',
                         }}
-                        onClick={(e) => { e.stopPropagation(); setSelectedAppt(appt) }}
+                        onClick={() => setSelectedAppt(appt)}
                       >
                         <p className="font-semibold truncate">
                           {appt.customer?.firstName} {appt.customer?.lastName}
                         </p>
                         {height > 40 && (
                           <p className="truncate opacity-90">
-                            {formatTime(appt.startsAt)} · {appt.service?.name ?? `${appt.durationMinutes}min`}
+                            {formatTime(appt.startsAt, tz)} · {appt.service?.name ?? `${appt.durationMinutes}min`}
                           </p>
                         )}
-                      </div>
+                      </button>
                     )
                   })}
                 </div>
@@ -194,61 +243,13 @@ export default function CalendarPage() {
         )}
       </div>
 
-      {/* Appointment detail panel */}
-      {selectedAppt && (
-        <div
-          className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-4"
-          onClick={() => setSelectedAppt(null)}
-        >
-          <div
-            className="bg-background rounded-xl shadow-xl w-full max-w-sm p-5 space-y-3"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="font-semibold">
-                  {selectedAppt.customer?.firstName} {selectedAppt.customer?.lastName}
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {formatTime(selectedAppt.startsAt)} – {formatTime(selectedAppt.endsAt)}
-                </p>
-              </div>
-              <StatusBadge status={selectedAppt.status} />
-            </div>
-
-            {selectedAppt.service && (
-              <p className="text-sm">{selectedAppt.service.name}</p>
-            )}
-
-            {selectedAppt.customer?.phone && (
-              <p className="text-sm text-muted-foreground">{selectedAppt.customer.phone}</p>
-            )}
-
-            {(selectedAppt.address || selectedAppt.city) && (
-              <p className="text-sm text-muted-foreground">
-                {[selectedAppt.address, selectedAppt.city].filter(Boolean).join(', ')}
-              </p>
-            )}
-
-            {selectedAppt.notes && (
-              <p className="text-sm italic text-muted-foreground">"{selectedAppt.notes}"</p>
-            )}
-
-            {selectedAppt.priceCents != null && (
-              <p className="text-sm font-semibold">{formatPrice(selectedAppt.priceCents)}</p>
-            )}
-
-            <Button variant="outline" className="w-full" onClick={() => setSelectedAppt(null)}>
-              Cerrar
-            </Button>
-          </div>
-        </div>
-      )}
+      {/* Appointment detail + status actions (Dialog handles focus-trap/Escape) */}
+      <AppointmentDetailDialog appointment={selectedAppt} onClose={() => setSelectedAppt(null)} />
 
       <NewAppointmentDialog
         open={showNew}
         onClose={() => setShowNew(false)}
-        defaultDate={selectedDate || new Date().toISOString().split('T')[0]}
+        defaultDate={selectedDate || todayInTimezone(tz)}
         defaultEmployeeId={selectedEmployeeId !== 'all' ? selectedEmployeeId : undefined}
       />
     </div>

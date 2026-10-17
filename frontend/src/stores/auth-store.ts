@@ -13,16 +13,16 @@ interface Tenant {
   id: string;
   name: string;
   slug: string;
+  timezone?: string;
 }
 
 interface AuthState {
+  // Tokens live in httpOnly cookies (out of JS reach). We only keep the
+  // non-sensitive identity here, persisted so the UI knows there's a session.
   user: User | null;
   tenant: Tenant | null;
-  accessToken: string | null;
-  refreshToken: string | null;
 
-  setAuth: (user: User, tenant: Tenant, accessToken: string, refreshToken: string) => void;
-  setTokens: (accessToken: string, refreshToken: string) => void;
+  setAuth: (user: User, tenant: Tenant) => void;
   logout: () => void;
   isAuthenticated: () => boolean;
 }
@@ -32,31 +32,23 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       user: null,
       tenant: null,
-      accessToken: null,
-      refreshToken: null,
 
-      setAuth: (user, tenant, accessToken, refreshToken) =>
-        set({ user, tenant, accessToken, refreshToken }),
-
-      setTokens: (accessToken, refreshToken) =>
-        set({ accessToken, refreshToken }),
+      setAuth: (user, tenant) => set({ user, tenant }),
 
       logout: () => {
-        set({ user: null, tenant: null, accessToken: null, refreshToken: null });
+        set({ user: null, tenant: null });
         if (typeof window !== 'undefined') {
           window.location.href = '/login';
         }
       },
 
-      isAuthenticated: () => !!get().accessToken,
+      isAuthenticated: () => !!get().user,
     }),
     {
       name: 'saascitas-auth',
       partialize: (state) => ({
         user: state.user,
         tenant: state.tenant,
-        accessToken: state.accessToken,
-        refreshToken: state.refreshToken,
       }),
     },
   ),

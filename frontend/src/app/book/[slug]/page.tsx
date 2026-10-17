@@ -8,7 +8,7 @@ interface Props {
 
 async function getBusinessInfo(slug: string) {
   try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'}/v1/booking/${slug}`, {
+    const res = await fetch(`${process.env.BACKEND_URL ?? 'http://localhost:3001'}/v1/booking/${slug}`, {
       next: { revalidate: 60 },
     })
     if (!res.ok) return null

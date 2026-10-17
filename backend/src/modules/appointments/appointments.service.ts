@@ -4,19 +4,36 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
+import { AppointmentStatus } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AvailabilityService } from './availability.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { isOverlapConstraintViolation } from '../../common/utils/prisma-errors';
+import { assertMonthlyAppointmentQuota } from '../../common/utils/plan-limits';
+import {
+  todayInTz,
+  startOfDayUtc,
+  endOfDayUtc,
+  formatDateInTz,
+  formatTimeInTz,
+} from '../../common/utils/timezone';
 import {
   CreateAppointmentDto,
   UpdateAppointmentDto,
   UpdateStatusDto,
 } from './dto/create-appointment.dto';
 
+const SLOT_TAKEN_MESSAGE =
+  'This time slot is not available. The employee already has an appointment.';
+const DEFAULT_TZ = 'Europe/Madrid';
+const VALID_STATUSES = Object.values(AppointmentStatus) as string[];
+
 @Injectable()
 export class AppointmentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly availabilityService: AvailabilityService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async findAll(
@@ -39,9 +56,14 @@ export class AppointmentsService {
     }
 
     if (options.employeeId) where.employeeId = options.employeeId;
-    if (options.status) where.status = options.status;
+    if (options.status) {
+      if (!VALID_STATUSES.includes(options.status)) {
+        throw new BadRequestException(`Invalid status: ${options.status}`);
+      }
+      where.status = options.status;
+    }
 
-    const limit = options.limit || 50;
+    const limit = Math.min(Math.max(options.limit || 50, 1), 100);
 
     const appointments = await this.prisma.appointment.findMany({
       where,
@@ -52,7 +74,9 @@ export class AppointmentsService {
         customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
         service: { select: { id: true, name: true, color: true } },
       },
-      orderBy: { startsAt: 'asc' },
+      // id tiebreaker so cursor pagination is stable when several appointments
+      // share the same startsAt.
+      orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
     });
 
     const hasMore = appointments.length > limit;
@@ -106,6 +130,9 @@ export class AppointmentsService {
     const startsAt = new Date(dto.startsAt);
     const endsAt = new Date(startsAt.getTime() + durationMinutes * 60 * 1000);
 
+    // Plan quota (e.g. 100 appointments/month on Basic)
+    await assertMonthlyAppointmentQuota(this.prisma, tenantId, startsAt);
+
     // Check for conflicts
     const isAvailable = await this.availabilityService.isSlotAvailable(
       tenantId,
@@ -115,9 +142,7 @@ export class AppointmentsService {
     );
 
     if (!isAvailable) {
-      throw new ConflictException(
-        'This time slot is not available. The employee already has an appointment.',
-      );
+      throw new ConflictException(SLOT_TAKEN_MESSAGE);
     }
 
     // Verify employee exists
@@ -138,29 +163,39 @@ export class AppointmentsService {
       throw new BadRequestException('Customer not found');
     }
 
-    const appointment = await this.prisma.appointment.create({
-      data: {
-        tenantId,
-        employeeId: dto.employeeId,
-        customerId: dto.customerId,
-        serviceId: dto.serviceId,
-        startsAt,
-        endsAt,
-        durationMinutes,
-        address: dto.address,
-        city: dto.city,
-        postalCode: dto.postalCode,
-        notes: dto.notes,
-        customerNotes: dto.customerNotes,
-        priceCents,
-        source: 'manual',
-      },
-      include: {
-        employee: { select: { id: true, firstName: true, lastName: true } },
-        customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
-        service: { select: { id: true, name: true } },
-      },
-    });
+    let appointment;
+    try {
+      appointment = await this.prisma.appointment.create({
+        data: {
+          tenantId,
+          employeeId: dto.employeeId,
+          customerId: dto.customerId,
+          serviceId: dto.serviceId,
+          startsAt,
+          endsAt,
+          durationMinutes,
+          address: dto.address,
+          city: dto.city,
+          postalCode: dto.postalCode,
+          notes: dto.notes,
+          customerNotes: dto.customerNotes,
+          priceCents,
+          source: 'manual',
+        },
+        include: {
+          employee: { select: { id: true, firstName: true, lastName: true } },
+          customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
+          service: { select: { id: true, name: true } },
+        },
+      });
+    } catch (err) {
+      // Race safety net: another appointment for the same slot was created
+      // between the availability check and this insert.
+      if (isOverlapConstraintViolation(err)) {
+        throw new ConflictException(SLOT_TAKEN_MESSAGE);
+      }
+      throw err;
+    }
 
     // Update customer stats
     await this.prisma.customer.update({
@@ -170,6 +205,12 @@ export class AppointmentsService {
         lastAppointmentAt: startsAt,
       },
     });
+
+    // Manual appointments get the same 24h reminder as online bookings (it
+    // was only queued if the appointment was later moved). Fire-and-forget.
+    void this.notifications
+      .queueBookingReminder(appointment.id, startsAt)
+      .catch(() => undefined);
 
     return appointment;
   }
@@ -183,12 +224,16 @@ export class AppointmentsService {
       );
     }
 
+    const timeChanged = Boolean(dto.startsAt || dto.durationMinutes);
     const startsAt = dto.startsAt ? new Date(dto.startsAt) : existing.startsAt;
     const durationMinutes = dto.durationMinutes || existing.durationMinutes;
     const endsAt = new Date(startsAt.getTime() + durationMinutes * 60 * 1000);
 
     // If time changed, check for conflicts
-    if (dto.startsAt || dto.durationMinutes) {
+    if (timeChanged) {
+      // Moving it to another month must fit that month's plan quota.
+      await assertMonthlyAppointmentQuota(this.prisma, tenantId, startsAt, id);
+
       const isAvailable = await this.availabilityService.isSlotAvailable(
         tenantId,
         existing.employeeId,
@@ -198,30 +243,48 @@ export class AppointmentsService {
       );
 
       if (!isAvailable) {
-        throw new ConflictException(
-          'This time slot is not available. The employee already has an appointment.',
-        );
+        throw new ConflictException(SLOT_TAKEN_MESSAGE);
       }
     }
 
-    return this.prisma.appointment.update({
-      where: { id },
-      data: {
-        ...(dto.startsAt && { startsAt }),
-        ...(dto.durationMinutes && { durationMinutes, endsAt }),
-        ...(dto.address !== undefined && { address: dto.address }),
-        ...(dto.city !== undefined && { city: dto.city }),
-        ...(dto.postalCode !== undefined && { postalCode: dto.postalCode }),
-        ...(dto.notes !== undefined && { notes: dto.notes }),
-        ...(dto.customerNotes !== undefined && { customerNotes: dto.customerNotes }),
-        ...(dto.priceCents !== undefined && { priceCents: dto.priceCents }),
-      },
-      include: {
-        employee: { select: { id: true, firstName: true, lastName: true } },
-        customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
-        service: { select: { id: true, name: true } },
-      },
-    });
+    let updated;
+    try {
+      updated = await this.prisma.appointment.update({
+        where: { id },
+        data: {
+          // Always persist the three time fields together so endsAt stays
+          // consistent with startsAt/durationMinutes (moving startsAt alone
+          // must recompute endsAt, not leave the old value).
+          ...(timeChanged && { startsAt, durationMinutes, endsAt }),
+          ...(dto.address !== undefined && { address: dto.address }),
+          ...(dto.city !== undefined && { city: dto.city }),
+          ...(dto.postalCode !== undefined && { postalCode: dto.postalCode }),
+          ...(dto.notes !== undefined && { notes: dto.notes }),
+          ...(dto.customerNotes !== undefined && { customerNotes: dto.customerNotes }),
+          ...(dto.priceCents !== undefined && { priceCents: dto.priceCents }),
+        },
+        include: {
+          employee: { select: { id: true, firstName: true, lastName: true } },
+          customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
+          service: { select: { id: true, name: true } },
+        },
+      });
+    } catch (err) {
+      if (isOverlapConstraintViolation(err)) {
+        throw new ConflictException(SLOT_TAKEN_MESSAGE);
+      }
+      throw err;
+    }
+
+    // Move the reminder to the new time so it doesn't fire at the old date
+    // (fire-and-forget — never block or fail the update on queue issues).
+    if (timeChanged) {
+      void this.notifications
+        .rescheduleReminder(id, startsAt)
+        .catch(() => undefined);
+    }
+
+    return updated;
   }
 
   async updateStatus(tenantId: string, id: string, dto: UpdateStatusDto) {
@@ -251,10 +314,45 @@ export class AppointmentsService {
       updateData.cancellationReason = dto.cancellationReason;
     }
 
-    return this.prisma.appointment.update({
-      where: { id },
-      data: updateData,
+    // Keep customer stats consistent with the status change, atomically:
+    //  - cancelling undoes the +1 added at creation
+    //  - completing adds the appointment price to the customer's total spent
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // Compare-and-set on the status we validated: a concurrent change (e.g.
+      // the customer cancelling from the email link at the same moment) must
+      // not apply twice and double-count the customer stats.
+      const claim = await tx.appointment.updateMany({
+        where: { id, tenantId, status: existing.status },
+        data: updateData,
+      });
+      if (claim.count === 0) {
+        throw new ConflictException(
+          'The appointment status changed meanwhile. Reload and try again.',
+        );
+      }
+      const appt = await tx.appointment.findUniqueOrThrow({ where: { id } });
+
+      if (dto.status === 'cancelled') {
+        await tx.customer.update({
+          where: { id: existing.customerId },
+          data: { totalAppointments: { decrement: 1 } },
+        });
+      } else if (dto.status === 'completed' && existing.priceCents) {
+        await tx.customer.update({
+          where: { id: existing.customerId },
+          data: { totalSpentCents: { increment: BigInt(existing.priceCents) } },
+        });
+      }
+
+      return appt;
     });
+
+    // Drop the queued reminder for a cancelled appointment (fire-and-forget).
+    if (dto.status === 'cancelled') {
+      void this.notifications.cancelReminder(id).catch(() => undefined);
+    }
+
+    return updated;
   }
 
   async getCalendar(
@@ -263,10 +361,13 @@ export class AppointmentsService {
     to: string,
     employeeId?: string,
   ) {
+    // Overlap, not containment: an appointment that starts before `from` or
+    // ends after `to` but still overlaps the window must appear (e.g. a
+    // 23:30→00:30 booking, or one straddling the requested day view).
     const where: any = {
       tenantId,
-      startsAt: { gte: new Date(from) },
-      endsAt: { lte: new Date(to) },
+      startsAt: { lt: new Date(to) },
+      endsAt: { gt: new Date(from) },
       status: { notIn: ['cancelled'] },
     };
 
@@ -279,21 +380,29 @@ export class AppointmentsService {
         customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
         service: { select: { id: true, name: true, color: true } },
       },
-      orderBy: { startsAt: 'asc' },
+      orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
     });
   }
 
   async getToday(tenantId: string, employeeId?: string) {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+    // "Today" is the tenant's civil day, not the server's.
+    const tz = await this.getTenantTz(tenantId);
+    const today = todayInTz(tz);
 
     return this.getCalendar(
       tenantId,
-      todayStart.toISOString(),
-      todayEnd.toISOString(),
+      startOfDayUtc(today, tz).toISOString(),
+      endOfDayUtc(today, tz).toISOString(),
       employeeId,
     );
+  }
+
+  private async getTenantTz(tenantId: string): Promise<string> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { timezone: true },
+    });
+    return tenant?.timezone ?? DEFAULT_TZ;
   }
 
   async exportCsv(
@@ -301,6 +410,8 @@ export class AppointmentsService {
     from?: string,
     to?: string,
   ): Promise<string> {
+    const tz = await this.getTenantTz(tenantId);
+
     const where: any = { tenantId };
     if (from || to) {
       where.startsAt = {};
@@ -330,9 +441,9 @@ export class AppointmentsService {
 
     const lines = rows.map((a) => [
       escape(a.id),
-      escape(a.startsAt.toISOString().split('T')[0]),
-      escape(a.startsAt.toTimeString().slice(0, 5)),
-      escape(a.endsAt.toTimeString().slice(0, 5)),
+      escape(formatDateInTz(a.startsAt, tz)),
+      escape(formatTimeInTz(a.startsAt, tz)),
+      escape(formatTimeInTz(a.endsAt, tz)),
       escape(`${a.customer.firstName} ${a.customer.lastName}`),
       escape(a.customer.email),
       escape(a.customer.phone),

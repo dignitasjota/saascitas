@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -17,7 +17,8 @@ import { useEmployees } from '@/hooks/use-employees'
 import { useServices } from '@/hooks/use-services'
 import { useCustomers } from '@/hooks/use-customers'
 import { useAvailability, useCreateAppointment } from '@/hooks/use-appointments'
-import { formatPrice } from '@/lib/utils'
+import { formatPrice, todayInTimezone, zonedWallTimeToUtc } from '@/lib/utils'
+import { useTenantTimezone } from '@/hooks/use-tenant'
 
 const schema = z.object({
   employeeId: z.string().uuid('Selecciona un empleado'),
@@ -32,6 +33,8 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>
 
+const DURATIONS = [15, 30, 45, 60, 90, 120, 180, 240]
+
 interface Props {
   open: boolean
   onClose: () => void
@@ -40,6 +43,8 @@ interface Props {
 }
 
 export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmployeeId }: Props) {
+  const tz = useTenantTimezone()
+  const [customDuration, setCustomDuration] = useState(60)
   const createAppointment = useCreateAppointment()
   const { data: employees = [] } = useEmployees()
   const { data: services = [] } = useServices()
@@ -50,32 +55,49 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
   const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
-      date: defaultDate ?? new Date().toISOString().split('T')[0],
+      date: defaultDate ?? todayInTimezone(tz),
       employeeId: defaultEmployeeId ?? '',
     },
   })
+
+  // The dialog stays mounted, so defaultValues (evaluated once) go stale. Re-seed
+  // the form each time it opens or the defaults change (e.g. clicking a calendar
+  // cell), otherwise the appointment is created on today's date, not the picked one.
+  useEffect(() => {
+    if (open) {
+      reset({
+        date: defaultDate ?? todayInTimezone(tz),
+        employeeId: defaultEmployeeId ?? '',
+        customerId: '',
+        serviceId: undefined,
+        slot: '',
+        address: '',
+        city: '',
+        notes: '',
+      })
+    }
+    setCustomDuration(60)
+  }, [open, defaultDate, defaultEmployeeId, reset, tz])
 
   const watchedEmployeeId = watch('employeeId')
   const watchedServiceId = watch('serviceId')
   const watchedDate = watch('date')
 
   const selectedService = services.find(s => s.id === watchedServiceId)
-  const duration = selectedService?.durationMinutes ?? 60
+  // Without a service the backend needs an explicit duration.
+  const duration = selectedService?.durationMinutes ?? customDuration
 
   const { data: slots = [] } = useAvailability(watchedEmployeeId, watchedDate, duration)
   const availableSlots = slots.filter(s => s.available)
 
   const onSubmit = async (data: FormData) => {
-    const [hours, minutes] = data.slot.split(':').map(Number)
-    const startsAt = new Date(`${data.date}T${data.slot}:00`)
-    // send as ISO with local offset
-    startsAt.setHours(hours, minutes, 0, 0)
-
     await createAppointment.mutateAsync({
       employeeId: data.employeeId,
       customerId: data.customerId,
       serviceId: data.serviceId || undefined,
-      startsAt: new Date(`${data.date}T${data.slot}:00`).toISOString(),
+      ...(!selectedService && { durationMinutes: customDuration }),
+      // The slot is wall-clock time in the business's timezone.
+      startsAt: zonedWallTimeToUtc(data.date, data.slot, tz).toISOString(),
       address: data.address || undefined,
       city: data.city || undefined,
       notes: data.notes || undefined,
@@ -94,12 +116,12 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           {/* Employee */}
           <div className="space-y-1.5">
-            <Label>Empleado</Label>
+            <Label id="appointment-employee-label">Empleado</Label>
             <Select
               value={watch('employeeId')}
               onValueChange={(v) => { setValue('employeeId', v ?? ''); setValue('slot', '') }}
             >
-              <SelectTrigger>
+              <SelectTrigger aria-labelledby="appointment-employee-label">
                 <SelectValue placeholder="Seleccionar empleado" />
               </SelectTrigger>
               <SelectContent>
@@ -118,12 +140,12 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
 
           {/* Service */}
           <div className="space-y-1.5">
-            <Label>Servicio <span className="text-muted-foreground">(opcional)</span></Label>
+            <Label id="appointment-service-label">Servicio <span className="text-muted-foreground">(opcional)</span></Label>
             <Select
               value={watch('serviceId') ?? ''}
               onValueChange={(v) => { setValue('serviceId', (v ?? '') as any); setValue('slot', '') }}
             >
-              <SelectTrigger>
+              <SelectTrigger aria-labelledby="appointment-service-label">
                 <SelectValue placeholder="Sin servicio específico" />
               </SelectTrigger>
               <SelectContent>
@@ -138,10 +160,30 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
             </Select>
           </div>
 
+          {!selectedService && (
+            <div className="space-y-1.5">
+              <Label id="appointment-duration-label">Duración</Label>
+              <Select
+                value={String(customDuration)}
+                onValueChange={(v) => { setCustomDuration(Number(v)); setValue('slot', '') }}
+              >
+                <SelectTrigger aria-labelledby="appointment-duration-label">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DURATIONS.map(d => (
+                    <SelectItem key={d} value={String(d)}>{d} min</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           {/* Customer */}
           <div className="space-y-1.5">
-            <Label>Cliente</Label>
+            <Label id="appointment-customer-label" htmlFor="appointment-customer-search">Cliente</Label>
             <Input
+              id="appointment-customer-search"
               placeholder="Buscar cliente por nombre o teléfono..."
               value={customerSearch}
               onChange={(e) => setCustomerSearch(e.target.value)}
@@ -151,7 +193,7 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
               value={watch('customerId')}
               onValueChange={(v) => setValue('customerId', v ?? '')}
             >
-              <SelectTrigger>
+              <SelectTrigger aria-labelledby="appointment-customer-label">
                 <SelectValue placeholder="Seleccionar cliente" />
               </SelectTrigger>
               <SelectContent>
@@ -168,8 +210,9 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
           {/* Date + Slot */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Fecha</Label>
+              <Label htmlFor="appointment-date">Fecha</Label>
               <Input
+                id="appointment-date"
                 type="date"
                 {...register('date')}
                 onChange={(e) => { setValue('date', e.target.value); setValue('slot', '') }}
@@ -178,13 +221,13 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
             </div>
 
             <div className="space-y-1.5">
-              <Label>Hora</Label>
+              <Label id="appointment-slot-label">Hora</Label>
               <Select
                 value={watch('slot')}
                 onValueChange={(v) => setValue('slot', v ?? '')}
                 disabled={!watchedEmployeeId || !watchedDate}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-labelledby="appointment-slot-label">
                   <SelectValue placeholder={
                     !watchedEmployeeId ? 'Elige empleado' :
                     availableSlots.length === 0 ? 'Sin huecos' :
@@ -206,19 +249,19 @@ export function NewAppointmentDialog({ open, onClose, defaultDate, defaultEmploy
           {/* Address */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Dirección <span className="text-muted-foreground">(opcional)</span></Label>
-              <Input placeholder="Calle Mayor 15, 3B" {...register('address')} />
+              <Label htmlFor="appointment-address">Dirección <span className="text-muted-foreground">(opcional)</span></Label>
+              <Input id="appointment-address" placeholder="Calle Mayor 15, 3B" {...register('address')} />
             </div>
             <div className="space-y-1.5">
-              <Label>Ciudad</Label>
-              <Input placeholder="Madrid" {...register('city')} />
+              <Label htmlFor="appointment-city">Ciudad</Label>
+              <Input id="appointment-city" placeholder="Madrid" {...register('city')} />
             </div>
           </div>
 
           {/* Notes */}
           <div className="space-y-1.5">
-            <Label>Notas internas <span className="text-muted-foreground">(opcional)</span></Label>
-            <Input placeholder="Llamar antes de subir..." {...register('notes')} />
+            <Label htmlFor="appointment-notes">Notas internas <span className="text-muted-foreground">(opcional)</span></Label>
+            <Input id="appointment-notes" placeholder="Llamar antes de subir..." {...register('notes')} />
           </div>
 
           <DialogFooter>

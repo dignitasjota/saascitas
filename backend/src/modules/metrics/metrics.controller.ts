@@ -1,6 +1,16 @@
-import { Controller, Get, Query, Request } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Query, Request } from '@nestjs/common';
 import { MetricsService } from './metrics.service';
 import { Roles } from '../../common/decorators/roles.decorator';
+
+/** `days` query param: 1–366, default 30 (it sizes an in-memory day map). */
+function parseDays(days?: string): number {
+  if (days === undefined || days === '') return 30;
+  const n = Number(days);
+  if (!Number.isInteger(n) || n < 1 || n > 366) {
+    throw new BadRequestException('days must be an integer between 1 and 366');
+  }
+  return n;
+}
 
 @Controller('metrics')
 @Roles('owner', 'admin')
@@ -19,7 +29,7 @@ export class MetricsController {
     const tenantId = req.user.tid;
     const data = await this.metricsService.getRevenueChart(
       tenantId,
-      days ? parseInt(days, 10) : 30,
+      parseDays(days),
     );
     return { data };
   }
@@ -29,7 +39,7 @@ export class MetricsController {
     const tenantId = req.user.tid;
     const data = await this.metricsService.getAppointmentsChart(
       tenantId,
-      days ? parseInt(days, 10) : 30,
+      parseDays(days),
     );
     return { data };
   }

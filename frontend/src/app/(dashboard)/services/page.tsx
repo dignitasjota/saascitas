@@ -5,6 +5,7 @@ import { Plus, Wrench, Clock, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import { useServices, useCreateService, useDeleteService } from '@/hooks/use-services'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
@@ -25,7 +26,7 @@ type FormData = z.infer<typeof schema>
 
 export default function ServicesPage() {
   const [showNew, setShowNew] = useState(false)
-  const { data: services = [], isLoading } = useServices()
+  const { data: services = [], isLoading, isError, refetch } = useServices()
   const deleteService = useDeleteService()
 
   return (
@@ -43,7 +44,11 @@ export default function ServicesPage() {
         </div>
       )}
 
-      {!isLoading && services.length === 0 && (
+      {isError && (
+        <ErrorState message="No se pudieron cargar los servicios" onRetry={() => refetch()} />
+      )}
+
+      {!isLoading && !isError && services.length === 0 && (
         <div className="rounded-lg border border-dashed p-10 text-center">
           <Wrench className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
           <p className="text-sm font-medium">No hay servicios</p>
@@ -100,7 +105,16 @@ export default function ServicesPage() {
                       variant="ghost"
                       size="icon"
                       className="text-muted-foreground hover:text-destructive"
-                      onClick={() => deleteService.mutate(s.id)}
+                      disabled={deleteService.isPending}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `¿Eliminar el servicio "${s.name}"? Esta acción no se puede deshacer.`,
+                          )
+                        ) {
+                          deleteService.mutate(s.id)
+                        }
+                      }}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -139,23 +153,23 @@ function NewServiceDialog({ open, onClose }: { open: boolean; onClose: () => voi
         <DialogHeader><DialogTitle>Nuevo servicio</DialogTitle></DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1.5">
-            <Label>Nombre *</Label>
-            <Input placeholder="Revisión eléctrica" {...register('name')} />
+            <Label htmlFor="name">Nombre *</Label>
+            <Input id="name" placeholder="Revisión eléctrica" {...register('name')} />
             {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
           </div>
           <div className="space-y-1.5">
-            <Label>Descripción</Label>
-            <Input placeholder="Descripción del servicio" {...register('description')} />
+            <Label htmlFor="description">Descripción</Label>
+            <Input id="description" placeholder="Descripción del servicio" {...register('description')} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Duración (min) *</Label>
-              <Input type="number" min={15} step={15} {...register('durationMinutes')} />
+              <Label htmlFor="durationMinutes">Duración (min) *</Label>
+              <Input id="durationMinutes" type="number" min={15} step={15} {...register('durationMinutes')} />
               {errors.durationMinutes && <p className="text-xs text-destructive">{errors.durationMinutes.message}</p>}
             </div>
             <div className="space-y-1.5">
-              <Label>Precio (€)</Label>
-              <Input type="number" min={0} step={0.01} placeholder="0.00" {...register('priceCents')} />
+              <Label htmlFor="priceCents">Precio (€)</Label>
+              <Input id="priceCents" type="number" min={0} step={0.01} placeholder="0.00" {...register('priceCents')} />
             </div>
           </div>
           <DialogFooter>

@@ -22,16 +22,19 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { getInitials } from '@/lib/utils'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 
-const navItems = [
-  { href: '/', label: 'Agenda', icon: CalendarDays, exact: true },
+type Role = 'owner' | 'admin' | 'technician'
+
+// `roles` mirrors the backend @Roles guards; items without it are for everyone.
+const navItems: { href: string; label: string; icon: typeof CalendarDays; exact?: boolean; roles?: Role[] }[] = [
+  { href: '/dashboard', label: 'Agenda', icon: CalendarDays, exact: true },
   { href: '/appointments', label: 'Citas', icon: CalendarDays },
   { href: '/customers', label: 'Clientes', icon: Users },
   { href: '/employees', label: 'Empleados', icon: UserCog },
   { href: '/services', label: 'Servicios', icon: Wrench },
-  { href: '/metrics', label: 'Métricas', icon: BarChart3 },
-  { href: '/settings', label: 'Ajustes', icon: Settings },
-  { href: '/users', label: 'Usuarios', icon: UserCheck },
-  { href: '/billing', label: 'Facturación', icon: CreditCard },
+  { href: '/metrics', label: 'Métricas', icon: BarChart3, roles: ['owner', 'admin'] },
+  { href: '/settings', label: 'Ajustes', icon: Settings, roles: ['owner', 'admin'] },
+  { href: '/users', label: 'Usuarios', icon: UserCheck, roles: ['owner', 'admin'] },
+  { href: '/billing', label: 'Facturación', icon: CreditCard, roles: ['owner'] },
 ]
 
 function NavLink({ item, onClick }: { item: typeof navItems[0]; onClick?: () => void }) {
@@ -71,9 +74,11 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-        {navItems.map((item) => (
-          <NavLink key={item.href} item={item} onClick={onNavClick} />
-        ))}
+        {navItems
+          .filter((item) => !item.roles || item.roles.includes(user?.role as Role))
+          .map((item) => (
+            <NavLink key={item.href} item={item} onClick={onNavClick} />
+          ))}
       </nav>
 
       {/* User footer */}

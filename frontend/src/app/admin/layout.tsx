@@ -1,9 +1,11 @@
 'use client'
 
+import { useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { LayoutDashboard, Building2, LogOut } from 'lucide-react'
 import { useLogout } from '@/hooks/use-auth'
+import { useAuthStore } from '@/stores/auth-store'
 
 const navItems = [
   { href: '/admin', label: 'Overview', icon: LayoutDashboard },
@@ -12,7 +14,22 @@ const navItems = [
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
   const logout = useLogout()
+  const { user } = useAuthStore()
+
+  // Client-side guard: only authenticated superadmins may see the admin panel.
+  // (The backend enforces this too; this stops non-admins from rendering the
+  // broken shell.)
+  useEffect(() => {
+    if (!user) {
+      router.replace('/login')
+    } else if (user.role !== 'superadmin') {
+      router.replace('/dashboard')
+    }
+  }, [user, router])
+
+  if (!user || user.role !== 'superadmin') return null
 
   return (
     <div className="min-h-screen flex bg-gray-950 text-gray-100">

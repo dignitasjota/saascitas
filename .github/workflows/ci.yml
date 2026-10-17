@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  test-backend:
+  backend:
     name: Backend tests
     runs-on: ubuntu-latest
 
@@ -34,9 +34,8 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-    defaults:
-      run:
-        working-directory: backend
+    env:
+      DATABASE_URL: postgresql://saascitas:testpass@localhost:5432/saascitas_test
 
     steps:
       - uses: actions/checkout@v4
@@ -45,38 +44,32 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: backend/package-lock.json
+          cache-dependency-path: package-lock.json
 
+      # Install the whole workspace tree from the root lockfile (no per-package
+      # lockfiles exist in this hoisted monorepo).
       - name: Install dependencies
         run: npm ci
 
       - name: Generate Prisma client
-        run: npx prisma generate
-        env:
-          DATABASE_URL: postgresql://saascitas:testpass@localhost:5432/saascitas_test
+        run: npm run generate --workspace=backend
 
       - name: Run migrations
-        run: npx prisma migrate deploy
-        env:
-          DATABASE_URL: postgresql://saascitas:testpass@localhost:5432/saascitas_test
+        run: npm run migrate:deploy --workspace=backend
 
       - name: Run unit tests
-        run: npm test -- --coverage --coverageReporters=lcov
+        run: npm test --workspace=backend -- --coverage --coverageReporters=lcov
         env:
-          DATABASE_URL: postgresql://saascitas:testpass@localhost:5432/saascitas_test
           JWT_SECRET: test-secret-for-ci-only
           REDIS_HOST: localhost
           REDIS_PORT: 6379
 
       - name: Type check
-        run: npx tsc --noEmit
+        run: npx tsc -p backend/tsconfig.build.json --noEmit
 
-  test-frontend:
-    name: Frontend type check
+  frontend:
+    name: Frontend build
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
 
     steps:
       - uses: actions/checkout@v4
@@ -85,10 +78,15 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
       - name: Type check
-        run: npx tsc --noEmit
+        run: npx tsc -p frontend/tsconfig.json --noEmit
+
+      - name: Build
+        run: npm run build --workspace=frontend
+        env:
+          NEXT_PUBLIC_APP_URL: http://localhost:3000

@@ -9,16 +9,22 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AppointmentCard } from '@/components/appointments/appointment-card'
 import { NewAppointmentDialog } from '@/components/appointments/new-appointment-dialog'
+import { AppointmentDetailDialog } from '@/components/appointments/appointment-detail-dialog'
+import { ErrorState } from '@/components/ui/error-state'
 import { useToday } from '@/hooks/use-appointments'
 import { useAuthStore } from '@/stores/auth-store'
-import { formatDate } from '@/lib/utils'
+import { useTenantTimezone } from '@/hooks/use-tenant'
+import { formatDate, todayInTimezone } from '@/lib/utils'
 import apiClient from '@/lib/api-client'
+import type { Appointment } from '@/types/api'
 
 export default function DashboardPage() {
   const [showNew, setShowNew] = useState(false)
+  const [selectedAppt, setSelectedAppt] = useState<Appointment | null>(null)
   const { user } = useAuthStore()
-  const today = new Date().toISOString().split('T')[0]
-  const { data: appointments = [], isLoading } = useToday()
+  const tz = useTenantTimezone()
+  const today = todayInTimezone(tz)
+  const { data: appointments = [], isLoading, isError, refetch } = useToday()
 
   // Show onboarding banner if no services yet
   const { data: services } = useQuery({
@@ -61,7 +67,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-bold">Hola, {user?.firstName} 👋</h1>
           <p className="text-muted-foreground text-sm mt-0.5">
-            {formatDate(today)} · {appointments.length} cita{appointments.length !== 1 ? 's' : ''} hoy
+            {formatDate(new Date(), tz)} · {appointments.length} cita{appointments.length !== 1 ? 's' : ''} hoy
           </p>
         </div>
         <Button onClick={() => setShowNew(true)}>
@@ -88,7 +94,11 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {!isLoading && appointments.length === 0 && (
+        {isError && (
+          <ErrorState message="No se pudo cargar la agenda de hoy" onRetry={() => refetch()} />
+        )}
+
+        {!isLoading && !isError && appointments.length === 0 && (
           <div className="rounded-lg border border-dashed p-10 text-center">
             <CalendarDays className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
             <p className="text-sm font-medium">No hay citas para hoy</p>
@@ -104,11 +114,13 @@ export default function DashboardPage() {
         {!isLoading && appointments.length > 0 && (
           <div className="space-y-2">
             {appointments.map(a => (
-              <AppointmentCard key={a.id} appointment={a} />
+              <AppointmentCard key={a.id} appointment={a} onClick={() => setSelectedAppt(a)} />
             ))}
           </div>
         )}
       </div>
+
+      <AppointmentDetailDialog appointment={selectedAppt} onClose={() => setSelectedAppt(null)} />
 
       <NewAppointmentDialog
         open={showNew}

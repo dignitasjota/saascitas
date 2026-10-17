@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import {
   Dialog,
   DialogContent,
@@ -115,7 +116,7 @@ function CreateUserDialog({
     setValue,
     watch,
     reset,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
     defaultValues: { role: 'technician' },
@@ -146,41 +147,41 @@ function CreateUserDialog({
         <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label>Nombre</Label>
-              <Input {...register('firstName')} placeholder="Ana" />
+              <Label htmlFor="create-firstName">Nombre</Label>
+              <Input id="create-firstName" {...register('firstName')} placeholder="Ana" />
               {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
             </div>
             <div className="space-y-1">
-              <Label>Apellidos</Label>
-              <Input {...register('lastName')} placeholder="García" />
+              <Label htmlFor="create-lastName">Apellidos</Label>
+              <Input id="create-lastName" {...register('lastName')} placeholder="García" />
               {errors.lastName && <p className="text-xs text-destructive">{errors.lastName.message}</p>}
             </div>
           </div>
 
           <div className="space-y-1">
-            <Label>Email</Label>
-            <Input {...register('email')} type="email" placeholder="ana@empresa.com" />
+            <Label htmlFor="create-email">Email</Label>
+            <Input id="create-email" {...register('email')} type="email" placeholder="ana@empresa.com" />
             {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
           </div>
 
           <div className="space-y-1">
-            <Label>Contraseña</Label>
-            <Input {...register('password')} type="password" placeholder="Mínimo 8 caracteres" />
+            <Label htmlFor="create-password">Contraseña</Label>
+            <Input id="create-password" {...register('password')} type="password" placeholder="Mínimo 8 caracteres" />
             {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
           </div>
 
           <div className="space-y-1">
-            <Label>Teléfono <span className="text-muted-foreground">(opcional)</span></Label>
-            <Input {...register('phone')} type="tel" placeholder="+34 600 000 000" />
+            <Label htmlFor="create-phone">Teléfono <span className="text-muted-foreground">(opcional)</span></Label>
+            <Input id="create-phone" {...register('phone')} type="tel" placeholder="+34 600 000 000" />
           </div>
 
           <div className="space-y-1">
-            <Label>Rol</Label>
+            <Label id="create-role-label">Rol</Label>
             <Select
               value={watch('role')}
               onValueChange={(v) => setValue('role', v as CreateForm['role'])}
             >
-              <SelectTrigger>
+              <SelectTrigger aria-labelledby="create-role-label">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -194,8 +195,8 @@ function CreateUserDialog({
             <Button type="button" variant="outline" onClick={onClose}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            <Button type="submit" disabled={mutation.isPending}>
+              {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Crear usuario
             </Button>
           </DialogFooter>
@@ -224,7 +225,7 @@ function EditUserDialog({
     handleSubmit,
     setValue,
     watch,
-    formState: { errors, isSubmitting, isDirty },
+    formState: { errors, isDirty },
   } = useForm<EditForm>({
     resolver: zodResolver(editSchema),
     defaultValues: {
@@ -259,30 +260,30 @@ function EditUserDialog({
         <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label>Nombre</Label>
-              <Input {...register('firstName')} />
+              <Label htmlFor="edit-firstName">Nombre</Label>
+              <Input id="edit-firstName" {...register('firstName')} />
               {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
             </div>
             <div className="space-y-1">
-              <Label>Apellidos</Label>
-              <Input {...register('lastName')} />
+              <Label htmlFor="edit-lastName">Apellidos</Label>
+              <Input id="edit-lastName" {...register('lastName')} />
               {errors.lastName && <p className="text-xs text-destructive">{errors.lastName.message}</p>}
             </div>
           </div>
 
           <div className="space-y-1">
-            <Label>Teléfono</Label>
-            <Input {...register('phone')} type="tel" />
+            <Label htmlFor="edit-phone">Teléfono</Label>
+            <Input id="edit-phone" {...register('phone')} type="tel" />
           </div>
 
           <div className="space-y-1">
-            <Label>Rol</Label>
+            <Label id="edit-role-label">Rol</Label>
             <Select
               value={watch('role')}
               onValueChange={(v) => setValue('role', v as EditForm['role'])}
               disabled={user.role === 'owner' || isSelf}
             >
-              <SelectTrigger>
+              <SelectTrigger aria-labelledby="edit-role-label">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -304,8 +305,8 @@ function EditUserDialog({
             <Button type="button" variant="outline" onClick={onClose}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={isSubmitting || !isDirty}>
-              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            <Button type="submit" disabled={mutation.isPending || !isDirty}>
+              {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Guardar
             </Button>
           </DialogFooter>
@@ -353,7 +354,9 @@ function UserRow({
         <div className="flex items-center gap-3 mt-0.5">
           <p className="text-xs text-muted-foreground truncate">{user.email}</p>
           {user.emailVerifiedAt && (
-            <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" title="Email verificado" />
+            <span title="Email verificado" className="inline-flex shrink-0">
+              <CheckCircle2 className="h-3 w-3 text-green-500" aria-label="Email verificado" />
+            </span>
           )}
         </div>
       </div>
@@ -438,7 +441,7 @@ export default function UsersPage() {
   const [editingUser, setEditingUser] = useState<TenantUser | null>(null)
   const [deletingUser, setDeletingUser] = useState<TenantUser | null>(null)
 
-  const { data: users = [], isLoading } = useQuery<TenantUser[]>({
+  const { data: users = [], isLoading, isError, refetch } = useQuery<TenantUser[]>({
     queryKey: ['users'],
     queryFn: async () => {
       const res = await apiClient.get('/users')
@@ -504,6 +507,10 @@ export default function UsersPage() {
                 </div>
               </div>
             ))}
+          </div>
+        ) : isError ? (
+          <div className="p-4">
+            <ErrorState message="No se pudieron cargar los usuarios" onRetry={() => refetch()} />
           </div>
         ) : users.length === 0 ? (
           <div className="py-12 text-center text-muted-foreground text-sm">

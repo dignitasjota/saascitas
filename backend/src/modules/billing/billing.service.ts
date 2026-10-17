@@ -7,8 +7,12 @@ import {
 import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { isUniqueViolation } from '../../common/utils/prisma-errors';
+import { getMonthlyAppointmentUsage } from '../../common/utils/plan-limits';
 
-export type PlanKey = 'basic' | 'professional' | 'business';
+import { PLAN_MAX_EMPLOYEES, PlanKey } from '../../common/constants/plans';
+
+export type { PlanKey };
 
 const PLAN_PRICE_ENV: Record<PlanKey, string> = {
   basic: 'STRIPE_PRICE_BASIC',
@@ -25,8 +29,16 @@ export class BillingService {
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
   ) {
+    // Stripe throws if constructed with an empty key, which would crash app
+    // startup when billing isn't configured. Fall back to a placeholder and
+    // warn; any real Stripe call will then fail with a clear auth error.
     const secretKey = this.config.get<string>('STRIPE_SECRET_KEY', '');
-    this.stripe = new Stripe(secretKey, { apiVersion: '2026-02-25.clover' });
+    if (!secretKey) {
+      this.logger.warn('STRIPE_SECRET_KEY is not set — billing is not configured');
+    }
+    this.stripe = new Stripe(secretKey || 'sk_not_configured', {
+      apiVersion: '2026-02-25.clover',
+    });
   }
 
   /**
@@ -58,16 +70,21 @@ export class BillingService {
       }
     }
 
+    // Since API version 2025-03-31.basil the billing period lives on the
+    // subscription items, not on the subscription itself.
+    const periodEnd = subscription?.items?.data?.[0]?.current_period_end;
+
+    const monthlyAppointments = await getMonthlyAppointmentUsage(this.prisma, tenantId);
+
     return {
       plan: tenant.plan,
       planStatus: tenant.planStatus,
       trialEndsAt: tenant.trialEndsAt,
       maxEmployees: tenant.maxEmployees,
+      monthlyAppointments,
       hasActiveSubscription: !!subscription && subscription.status === 'active',
-      currentPeriodEnd: subscription
-        ? new Date((subscription as any).current_period_end * 1000)
-        : null,
-      cancelAtPeriodEnd: (subscription as any)?.cancel_at_period_end ?? false,
+      currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
+      cancelAtPeriodEnd: subscription?.cancel_at_period_end ?? false,
     };
   }
 
@@ -171,21 +188,44 @@ export class BillingService {
 
     this.logger.log(`Stripe event: ${event.type}`);
 
-    switch (event.type) {
-      case 'checkout.session.completed':
-        await this.onCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
-        break;
-      case 'customer.subscription.updated':
-        await this.onSubscriptionUpdated(event.data.object as Stripe.Subscription);
-        break;
-      case 'customer.subscription.deleted':
-        await this.onSubscriptionDeleted(event.data.object as Stripe.Subscription);
-        break;
-      case 'invoice.payment_failed':
-        await this.onPaymentFailed(event.data.object as Stripe.Invoice);
-        break;
-      default:
-        this.logger.debug(`Unhandled event: ${event.type}`);
+    // Idempotency: Stripe delivers at-least-once. Claim the event id first; a
+    // duplicate delivery collides on the primary key and is skipped without
+    // reprocessing.
+    try {
+      await this.prisma.stripeEvent.create({
+        data: { id: event.id, type: event.type },
+      });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        this.logger.log(`Duplicate Stripe event ${event.id} ignored`);
+        return { received: true };
+      }
+      throw err;
+    }
+
+    try {
+      switch (event.type) {
+        case 'checkout.session.completed':
+          await this.onCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
+          break;
+        case 'customer.subscription.updated':
+          await this.onSubscriptionUpdated(event.data.object as Stripe.Subscription);
+          break;
+        case 'customer.subscription.deleted':
+          await this.onSubscriptionDeleted(event.data.object as Stripe.Subscription);
+          break;
+        case 'invoice.payment_failed':
+          await this.onPaymentFailed(event.data.object as Stripe.Invoice);
+          break;
+        default:
+          this.logger.debug(`Unhandled event: ${event.type}`);
+      }
+    } catch (err) {
+      // Processing failed: drop the marker so Stripe's redelivery can retry it.
+      await this.prisma.stripeEvent
+        .delete({ where: { id: event.id } })
+        .catch(() => undefined);
+      throw err;
     }
 
     return { received: true };
@@ -220,9 +260,16 @@ export class BillingService {
   private async onSubscriptionUpdated(subscription: Stripe.Subscription) {
     const tenantId = subscription.metadata?.tenantId;
     if (!tenantId) return;
+    if (!(await this.isCurrentSubscription(tenantId, subscription.id))) return;
 
     const status = this.mapStripeStatus(subscription.status);
-    const plan = (subscription.metadata?.plan ?? 'basic') as PlanKey;
+    // Derive the plan from the CURRENT price on the subscription, not the
+    // checkout metadata (which is frozen and won't reflect a plan change made
+    // from the Billing Portal). Fall back to metadata only if the price is
+    // unknown.
+    const plan =
+      this.planFromSubscription(subscription) ??
+      ((subscription.metadata?.plan as PlanKey) ?? 'basic');
 
     await this.prisma.tenant.update({
       where: { id: tenantId },
@@ -239,6 +286,7 @@ export class BillingService {
   private async onSubscriptionDeleted(subscription: Stripe.Subscription) {
     const tenantId = subscription.metadata?.tenantId;
     if (!tenantId) return;
+    if (!(await this.isCurrentSubscription(tenantId, subscription.id))) return;
 
     await this.prisma.tenant.update({
       where: { id: tenantId },
@@ -246,7 +294,7 @@ export class BillingService {
         plan: 'basic',
         planStatus: 'cancelled' as any,
         stripeSubscriptionId: null,
-        maxEmployees: 1,
+        maxEmployees: PLAN_MAX_EMPLOYEES.basic,
       },
     });
 
@@ -270,13 +318,50 @@ export class BillingService {
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
+  /**
+   * Webhooks can arrive late or out of order. An event about an OLD
+   * subscription (e.g. its deletion after the tenant re-subscribed) must not
+   * clobber the current one. Unknown tenant subscription id (checkout event
+   * not processed yet) is accepted.
+   */
+  private async isCurrentSubscription(
+    tenantId: string,
+    subscriptionId: string,
+  ): Promise<boolean> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { stripeSubscriptionId: true },
+    });
+    if (!tenant) return false;
+    if (tenant.stripeSubscriptionId && tenant.stripeSubscriptionId !== subscriptionId) {
+      this.logger.warn(
+        `Ignoring event for stale subscription ${subscriptionId} (tenant ${tenantId} has ${tenant.stripeSubscriptionId})`,
+      );
+      return false;
+    }
+    return true;
+  }
+
+  /** Map the subscription's current price id back to a plan key. */
+  private planFromSubscription(
+    subscription: Stripe.Subscription,
+  ): PlanKey | null {
+    const priceId = subscription.items?.data?.[0]?.price?.id;
+    if (!priceId) return null;
+
+    const plans: PlanKey[] = ['basic', 'professional', 'business'];
+    for (const plan of plans) {
+      if (this.config.get<string>(PLAN_PRICE_ENV[plan]) === priceId) {
+        return plan;
+      }
+    }
+    return null;
+  }
+
   private getPlanLimits(plan: PlanKey): { maxEmployees: number } {
-    const limits: Record<PlanKey, { maxEmployees: number }> = {
-      basic: { maxEmployees: 1 },
-      professional: { maxEmployees: 5 },
-      business: { maxEmployees: 20 },
+    return {
+      maxEmployees: PLAN_MAX_EMPLOYEES[plan] ?? PLAN_MAX_EMPLOYEES.basic,
     };
-    return limits[plan] ?? limits.basic;
   }
 
   private mapStripeStatus(
@@ -288,7 +373,7 @@ export class BillingService {
       unpaid: 'past_due',
       canceled: 'cancelled',
       trialing: 'trialing',
-      paused: 'suspended',
+      paused: 'paused',
       incomplete: 'trialing',
       incomplete_expired: 'cancelled',
     };

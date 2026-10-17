@@ -8,7 +8,10 @@ import {
   Param,
   ParseUUIDPipe,
   HttpCode,
+  Req,
 } from '@nestjs/common';
+import { Request } from 'express';
+import { REFRESH_COOKIE } from '../../common/utils/auth-cookies';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -42,8 +45,14 @@ export class UsersController {
   async changePassword(
     @CurrentUser() user: JwtPayload,
     @Body() dto: ChangePasswordDto,
+    @Req() req: Request,
   ) {
-    await this.usersService.changePassword(user.tid, user.sub, dto);
+    await this.usersService.changePassword(
+      user.tid,
+      user.sub,
+      dto,
+      req.cookies?.[REFRESH_COOKIE],
+    );
   }
 
   // ─── User management (owner + admin) ───────────────────────────────────────

@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import { toast } from 'sonner'
 import { formatPrice } from '@/lib/utils'
 
@@ -38,6 +39,7 @@ interface Business {
   phone?: string
   city?: string
   logoUrl?: string
+  timezone?: string
 }
 
 interface Service {
@@ -162,7 +164,7 @@ export function BookingFlow({ business }: { business: Business }) {
 // ─── Step 1: Service selection ────────────────────────────────────────────────
 
 function ServiceStep({ slug, onSelect }: { slug: string; onSelect: (s: Service) => void }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['booking', slug, 'services'],
     queryFn: () => fetchJSON(`/booking/${slug}/services`).then(r => r.data as Service[]),
   })
@@ -178,6 +180,10 @@ function ServiceStep({ slug, onSelect }: { slug: string; onSelect: (s: Service) 
         <div className="space-y-3">
           {[1,2,3].map(i => <Skeleton key={i} className="h-20 rounded-xl" />)}
         </div>
+      )}
+
+      {isError && (
+        <ErrorState message="No se pudieron cargar los servicios" onRetry={() => refetch()} />
       )}
 
       <div className="space-y-2">
@@ -221,7 +227,7 @@ function ServiceStep({ slug, onSelect }: { slug: string; onSelect: (s: Service) 
 function EmployeeStep({
   slug, serviceId, onSelect, onBack,
 }: { slug: string; serviceId: string; onSelect: (e: Employee) => void; onBack: () => void }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['booking', slug, 'employees', serviceId],
     queryFn: () => fetchJSON(`/booking/${slug}/employees?serviceId=${serviceId}`).then(r => r.data as Employee[]),
   })
@@ -237,6 +243,10 @@ function EmployeeStep({
       </div>
 
       {isLoading && <div className="space-y-3">{[1,2].map(i => <Skeleton key={i} className="h-16 rounded-xl" />)}</div>}
+
+      {isError && (
+        <ErrorState message="No se pudieron cargar los técnicos" onRetry={() => refetch()} />
+      )}
 
       <div className="space-y-2">
         {data?.map(emp => (
@@ -426,32 +436,32 @@ function DetailsStep({
       <form onSubmit={handleSubmit(d => mutation.mutate(d))} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <Label>Nombre *</Label>
-            <Input placeholder="Juan" {...register('firstName')} />
+            <Label htmlFor="firstName">Nombre *</Label>
+            <Input id="firstName" placeholder="Juan" {...register('firstName')} />
             {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
           </div>
           <div className="space-y-1.5">
-            <Label>Apellido *</Label>
-            <Input placeholder="García" {...register('lastName')} />
+            <Label htmlFor="lastName">Apellido *</Label>
+            <Input id="lastName" placeholder="García" {...register('lastName')} />
             {errors.lastName && <p className="text-xs text-destructive">{errors.lastName.message}</p>}
           </div>
         </div>
 
         <div className="space-y-1.5">
-          <Label>Teléfono *</Label>
-          <Input type="tel" placeholder="+34 600 000 000" {...register('phone')} />
+          <Label htmlFor="phone">Teléfono *</Label>
+          <Input id="phone" type="tel" placeholder="+34 600 000 000" {...register('phone')} />
           {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
         </div>
 
         <div className="space-y-1.5">
-          <Label>Email <span className="text-muted-foreground">(para confirmación)</span></Label>
-          <Input type="email" placeholder="tu@email.com" {...register('email')} />
+          <Label htmlFor="email">Email <span className="text-muted-foreground">(para confirmación)</span></Label>
+          <Input id="email" type="email" placeholder="tu@email.com" {...register('email')} />
           {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
         </div>
 
         <div className="space-y-1.5">
-          <Label>Notas <span className="text-muted-foreground">(opcional)</span></Label>
-          <Input placeholder="Indicaciones, acceso al edificio..." {...register('notes')} />
+          <Label htmlFor="notes">Notas <span className="text-muted-foreground">(opcional)</span></Label>
+          <Input id="notes" placeholder="Indicaciones, acceso al edificio..." {...register('notes')} />
         </div>
 
         <Button type="submit" className="w-full" size="lg" disabled={mutation.isPending}>
@@ -475,8 +485,17 @@ function ConfirmationScreen({
   business: Business
   confirmation: any
 }) {
+  // Render in the business's timezone so a client booking from another zone
+  // still sees the local appointment time.
   const displayDate = confirmation.startsAt
-    ? format(new Date(confirmation.startsAt), "EEEE d 'de' MMMM 'a las' HH:mm'h'", { locale: es })
+    ? new Intl.DateTimeFormat('es-ES', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: business.timezone,
+      }).format(new Date(confirmation.startsAt))
     : ''
 
   return (

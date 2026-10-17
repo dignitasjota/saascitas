@@ -10,6 +10,15 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AvailabilityService } from '../appointments/availability.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import {
+  isOverlapConstraintViolation,
+  isUniqueViolation,
+} from '../../common/utils/prisma-errors';
+import { zonedWallTimeToUtc } from '../../common/utils/timezone';
+import { getMonthlyAppointmentUsage } from '../../common/utils/plan-limits';
+
+const MONTH_FULL_MESSAGE =
+  'Este negocio no admite más reservas online este mes. Contacta directamente con él.';
 import { CreateBookingDto } from './dto/booking.dto';
 
 @Injectable()
@@ -117,12 +126,21 @@ export class BookingService {
     serviceId: string,
   ) {
     const tenant = await this.getBusinessInfo(slug);
+    const settings = tenant.bookingSettings as any;
 
     const service = await this.prisma.service.findFirst({
       where: { id: serviceId, tenantId: tenant.id, isPublic: true, deletedAt: null },
     });
 
     if (!service) throw new NotFoundException('Service not found');
+
+    // No slots to offer once the month's plan quota is used up.
+    const usage = await getMonthlyAppointmentUsage(
+      this.prisma,
+      tenant.id,
+      zonedWallTimeToUtc(date, '12:00', tenant.timezone),
+    );
+    if (usage.limit !== null && usage.used >= usage.limit) return [];
 
     const slots = await this.availabilityService.getAvailableSlots(
       tenant.id,
@@ -131,8 +149,19 @@ export class BookingService {
       service.durationMinutes,
     );
 
-    // Only return available slots for the public page
-    return slots.filter((s) => s.available).map((s) => s.start);
+    // Only offer slots the client can actually book: available, and within the
+    // min/max advance window (so the last booking step doesn't reject them).
+    const now = Date.now();
+    const minAdvanceMs = (settings?.minAdvanceHours ?? 2) * 60 * 60 * 1000;
+    const maxAdvanceMs = (settings?.maxAdvanceDays ?? 30) * 24 * 60 * 60 * 1000;
+
+    return slots
+      .filter((s) => s.available)
+      .filter((s) => {
+        const at = zonedWallTimeToUtc(date, s.start, tenant.timezone).getTime();
+        return at - now >= minAdvanceMs && at - now <= maxAdvanceMs;
+      })
+      .map((s) => s.start);
   }
 
   /**
@@ -160,8 +189,24 @@ export class BookingService {
     });
     if (!employee) throw new BadRequestException('Employee not found');
 
-    // Build datetime
-    const startsAt = new Date(`${dto.date}T${dto.slot}:00`);
+    // Validate the employee actually offers this service
+    const offersService = await this.prisma.employeeService.findFirst({
+      where: {
+        tenantId: tenant.id,
+        employeeId: dto.employeeId,
+        serviceId: dto.serviceId,
+      },
+    });
+    if (!offersService) {
+      throw new BadRequestException(
+        'The selected professional does not offer this service',
+      );
+    }
+
+    // Build datetime: dto.slot ("HH:MM") is wall-clock time in the tenant's
+    // timezone, converted here to the UTC instant we store.
+    const startsAt = zonedWallTimeToUtc(dto.date, dto.slot, tenant.timezone);
+    const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60 * 1000);
 
     // Validate minimum advance time
     const minAdvanceMs = (settings?.minAdvanceHours ?? 2) * 60 * 60 * 1000;
@@ -171,91 +216,137 @@ export class BookingService {
       );
     }
 
-    const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60 * 1000);
-
-    // Check availability
-    const available = await this.availabilityService.isSlotAvailable(
-      tenant.id,
-      dto.employeeId,
-      startsAt,
-      endsAt,
-    );
-    if (!available) {
-      throw new ConflictException(
-        'This time slot is no longer available. Please choose another.',
+    // Validate maximum advance window
+    const maxAdvanceDays = settings?.maxAdvanceDays ?? 30;
+    const maxAdvanceMs = maxAdvanceDays * 24 * 60 * 60 * 1000;
+    if (startsAt.getTime() - Date.now() > maxAdvanceMs) {
+      throw new BadRequestException(
+        `Bookings cannot be made more than ${maxAdvanceDays} days in advance`,
       );
     }
 
-    // Find or create customer by phone within this tenant
+    // Plan quota (e.g. 100 appointments/month on Basic). The visitor gets a
+    // customer-facing message, not the owner's "upgrade your plan" one.
+    const usage = await getMonthlyAppointmentUsage(this.prisma, tenant.id, startsAt);
+    if (usage.limit !== null && usage.used >= usage.limit) {
+      throw new ConflictException(MONTH_FULL_MESSAGE);
+    }
+
+    // Validate the slot against real availability (working hours, schedule
+    // exceptions, buffer and existing appointments) — not just raw overlap.
+    // This rejects direct POSTs with off-grid or out-of-hours slots.
+    const daySlots = await this.availabilityService.getAvailableSlots(
+      tenant.id,
+      dto.employeeId,
+      dto.date,
+      service.durationMinutes,
+    );
+    const slotOk = daySlots.some((s) => s.start === dto.slot && s.available);
+    if (!slotOk) {
+      throw new ConflictException(
+        'This time slot is not available. Please choose another.',
+      );
+    }
+
+    // Find or create customer by phone within this tenant. The partial unique
+    // index on (tenant_id, phone) closes the race: if a concurrent booking
+    // created the same customer between our find and create, the create hits
+    // P2002 and we re-fetch the winner instead of inserting a duplicate.
     let customer = await this.prisma.customer.findFirst({
       where: { tenantId: tenant.id, phone: dto.phone, deletedAt: null },
     });
 
     if (!customer) {
-      customer = await this.prisma.customer.create({
-        data: {
-          tenantId: tenant.id,
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          phone: dto.phone,
-          email: dto.email,
-        },
-      });
+      try {
+        customer = await this.prisma.customer.create({
+          data: {
+            tenantId: tenant.id,
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            phone: dto.phone,
+            email: dto.email,
+          },
+        });
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          customer = await this.prisma.customer.findFirst({
+            where: { tenantId: tenant.id, phone: dto.phone, deletedAt: null },
+          });
+        }
+        if (!customer) throw err;
+      }
     }
 
     // Create appointment in a transaction
-    const result = await this.prisma.$transaction(async (tx) => {
-      const appointment = await tx.appointment.create({
-        data: {
-          tenantId: tenant.id,
-          employeeId: dto.employeeId,
-          customerId: customer!.id,
-          serviceId: dto.serviceId,
-          startsAt,
-          endsAt,
-          durationMinutes: service.durationMinutes,
-          priceCents: service.priceCents,
-          customerNotes: dto.notes,
-          source: 'booking_page',
-          status: settings?.autoConfirm ? 'confirmed' : 'pending',
-        },
+    let result;
+    try {
+      result = await this.prisma.$transaction(async (tx) => {
+        const appointment = await tx.appointment.create({
+          data: {
+            tenantId: tenant.id,
+            employeeId: dto.employeeId,
+            customerId: customer!.id,
+            serviceId: dto.serviceId,
+            startsAt,
+            endsAt,
+            durationMinutes: service.durationMinutes,
+            priceCents: service.priceCents,
+            customerNotes: dto.notes,
+            source: 'booking_page',
+            status: settings?.autoConfirm ? 'confirmed' : 'pending',
+          },
+        });
+
+        // Create confirmation token (valid 48h)
+        const confirmToken = randomBytes(32).toString('hex');
+        const cancelToken = randomBytes(32).toString('hex');
+
+        await tx.bookingToken.create({
+          data: {
+            tenantId: tenant.id,
+            appointmentId: appointment.id,
+            token: confirmToken,
+            action: 'confirm',
+            expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
+          },
+        });
+
+        await tx.bookingToken.create({
+          data: {
+            tenantId: tenant.id,
+            appointmentId: appointment.id,
+            token: cancelToken,
+            action: 'cancel',
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          },
+        });
+
+        // Update customer stats. An existing customer's email is only filled
+        // in when missing — never overwritten from an anonymous public form,
+        // or anyone knowing a phone number could redirect that customer's
+        // booking emails to themselves.
+        await tx.customer.update({
+          where: { id: customer!.id },
+          data: {
+            totalAppointments: { increment: 1 },
+            lastAppointmentAt: startsAt,
+            ...(!customer!.email && dto.email && { email: dto.email }),
+          },
+        });
+
+        return { appointment, confirmToken, cancelToken };
       });
-
-      // Create confirmation token (valid 48h)
-      const confirmToken = randomBytes(32).toString('hex');
-      const cancelToken = randomBytes(32).toString('hex');
-
-      await tx.bookingToken.create({
-        data: {
-          tenantId: tenant.id,
-          appointmentId: appointment.id,
-          token: confirmToken,
-          action: 'confirm',
-          expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
-        },
-      });
-
-      await tx.bookingToken.create({
-        data: {
-          tenantId: tenant.id,
-          appointmentId: appointment.id,
-          token: cancelToken,
-          action: 'cancel',
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        },
-      });
-
-      // Update customer stats
-      await tx.customer.update({
-        where: { id: customer!.id },
-        data: {
-          totalAppointments: { increment: 1 },
-          lastAppointmentAt: startsAt,
-        },
-      });
-
-      return { appointment, confirmToken, cancelToken };
-    });
+    } catch (err) {
+      // Race safety net: the slot was taken by a concurrent booking between
+      // the isSlotAvailable check above and this insert. The DB exclusion
+      // constraint rejects the overlap; surface it as a clean 409.
+      if (isOverlapConstraintViolation(err)) {
+        throw new ConflictException(
+          'This time slot is no longer available. Please choose another.',
+        );
+      }
+      throw err;
+    }
 
     // Queue notifications (fire-and-forget — don't block the response)
     void this.notificationsService
@@ -273,7 +364,10 @@ export class BookingService {
       endsAt: result.appointment.endsAt,
       service: { name: service.name, durationMinutes: service.durationMinutes, priceCents: service.priceCents },
       employee: { firstName: employee.firstName, lastName: employee.lastName },
-      customer: { firstName: customer.firstName, lastName: customer.lastName, phone: customer.phone },
+      // Echo what the visitor typed, never the stored customer record: the
+      // customer is matched by phone, so returning it would reveal the real
+      // name behind any phone number to an anonymous caller.
+      customer: { firstName: dto.firstName, lastName: dto.lastName, phone: dto.phone },
       cancelToken: result.cancelToken,
     };
   }
@@ -290,16 +384,39 @@ export class BookingService {
     if (!record) throw new NotFoundException('Invalid or expired confirmation link');
     if (record.expiresAt < new Date()) throw new GoneException('This confirmation link has expired');
 
-    await this.prisma.$transaction([
-      this.prisma.bookingToken.update({
-        where: { id: record.id },
+    // Do not resurrect a terminal appointment: a valid confirm token must not
+    // flip a cancelled/completed/no-show booking back to confirmed.
+    const appt = record.appointment;
+    if (['cancelled', 'completed', 'no_show'].includes(appt.status)) {
+      throw new BadRequestException(`Appointment is already ${appt.status}`);
+    }
+
+    // Claim the token and move the appointment atomically and conditionally,
+    // so a concurrent cancellation can't be overwritten by this confirm.
+    await this.prisma.$transaction(async (tx) => {
+      const token = await tx.bookingToken.updateMany({
+        where: { id: record.id, usedAt: null },
         data: { usedAt: new Date() },
-      }),
-      this.prisma.appointment.update({
-        where: { id: record.appointmentId },
-        data: { status: 'confirmed', confirmationSentAt: new Date() },
-      }),
-    ]);
+      });
+      if (token.count === 0) {
+        throw new NotFoundException('Invalid or expired confirmation link');
+      }
+      const appt = await tx.appointment.updateMany({
+        where: { id: record.appointmentId, status: 'pending' },
+        data: { status: 'confirmed' },
+      });
+      if (appt.count === 0) {
+        // Already confirmed (e.g. autoConfirm) is fine; anything else changed
+        // under us and must not be resurrected.
+        const current = await tx.appointment.findUnique({
+          where: { id: record.appointmentId },
+          select: { status: true },
+        });
+        if (current?.status !== 'confirmed' && current?.status !== 'in_progress') {
+          throw new BadRequestException(`Appointment is already ${current?.status}`);
+        }
+      }
+    });
 
     return { message: 'Appointment confirmed successfully' };
   }
@@ -316,25 +433,44 @@ export class BookingService {
     if (!record) throw new NotFoundException('Invalid or expired cancellation link');
     if (record.expiresAt < new Date()) throw new GoneException('This cancellation link has expired');
 
+    // A customer may only cancel an upcoming appointment that hasn't been
+    // dealt with yet: not one in progress, completed, or marked as a no-show
+    // (which would erase the no-show from the business's records).
     const appt = record.appointment;
-    if (appt.status === 'cancelled' || appt.status === 'completed') {
+    if (appt.status !== 'pending' && appt.status !== 'confirmed') {
       throw new BadRequestException(`Appointment is already ${appt.status}`);
     }
+    if (appt.startsAt.getTime() <= Date.now()) {
+      throw new BadRequestException('This appointment has already started');
+    }
 
-    await this.prisma.$transaction([
-      this.prisma.bookingToken.update({
-        where: { id: record.id },
+    await this.prisma.$transaction(async (tx) => {
+      const token = await tx.bookingToken.updateMany({
+        where: { id: record.id, usedAt: null },
         data: { usedAt: new Date() },
-      }),
-      this.prisma.appointment.update({
-        where: { id: record.appointmentId },
+      });
+      if (token.count === 0) {
+        throw new NotFoundException('Invalid or expired cancellation link');
+      }
+      // Compare-and-set on the status we checked, so a concurrent
+      // cancellation from the dashboard can't decrement the stats twice.
+      const cancelled = await tx.appointment.updateMany({
+        where: { id: record.appointmentId, status: appt.status },
         data: {
           status: 'cancelled',
           cancelledAt: new Date(),
           cancellationReason: reason ?? 'Cancelled by customer',
         },
-      }),
-    ]);
+      });
+      if (cancelled.count === 0) {
+        throw new BadRequestException('Appointment status changed meanwhile');
+      }
+      // Undo the +1 added to the customer at booking time.
+      await tx.customer.update({
+        where: { id: appt.customerId },
+        data: { totalAppointments: { decrement: 1 } },
+      });
+    });
 
     // Remove queued reminder if not yet sent
     void this.notificationsService

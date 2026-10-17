@@ -5,7 +5,10 @@ import { Plus, Search, Phone, Mail, CalendarDays, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { toast } from 'sonner'
 import { useCustomers, useCreateCustomer } from '@/hooks/use-customers'
+import { useDebounce } from '@/hooks/use-debounce'
+import { ErrorState } from '@/components/ui/error-state'
 import { formatDate, formatPrice } from '@/lib/utils'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -31,13 +34,16 @@ export default function CustomersPage() {
   const [search, setSearch] = useState('')
   const [showNew, setShowNew] = useState(false)
   const [exporting, setExporting] = useState(false)
-  const { data, isLoading } = useCustomers(search || undefined)
+  const debouncedSearch = useDebounce(search)
+  const { data, isLoading, isError, refetch } = useCustomers(debouncedSearch || undefined)
   const customers = data?.data ?? []
 
   const handleExport = async () => {
     setExporting(true)
     try {
       await downloadCsv('/customers/export', `clientes_${new Date().toISOString().split('T')[0]}.csv`)
+    } catch {
+      toast.error('No se pudo exportar el CSV')
     } finally {
       setExporting(false)
     }
@@ -91,7 +97,18 @@ export default function CustomersPage() {
               </tr>
             ))}
 
-            {!isLoading && customers.length === 0 && (
+            {isError && (
+              <tr>
+                <td colSpan={6} className="px-4 py-3">
+                  <ErrorState
+                    message="No se pudieron cargar los clientes"
+                    onRetry={() => refetch()}
+                  />
+                </td>
+              </tr>
+            )}
+
+            {!isLoading && !isError && customers.length === 0 && (
               <tr>
                 <td colSpan={6} className="text-center text-muted-foreground py-12">
                   {search ? 'Sin resultados' : 'No hay clientes todavía'}
@@ -158,38 +175,38 @@ function NewCustomerDialog({ open, onClose }: { open: boolean; onClose: () => vo
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Nombre *</Label>
-              <Input {...register('firstName')} />
+              <Label htmlFor="firstName">Nombre *</Label>
+              <Input id="firstName" {...register('firstName')} />
               {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
             </div>
             <div className="space-y-1.5">
-              <Label>Apellido</Label>
-              <Input {...register('lastName')} />
+              <Label htmlFor="lastName">Apellido</Label>
+              <Input id="lastName" {...register('lastName')} />
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label>Teléfono *</Label>
-            <Input type="tel" {...register('phone')} />
+            <Label htmlFor="phone">Teléfono *</Label>
+            <Input id="phone" type="tel" {...register('phone')} />
             {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
           </div>
           <div className="space-y-1.5">
-            <Label>Email</Label>
-            <Input type="email" {...register('email')} />
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" type="email" {...register('email')} />
             {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Dirección</Label>
-              <Input {...register('address')} />
+              <Label htmlFor="address">Dirección</Label>
+              <Input id="address" {...register('address')} />
             </div>
             <div className="space-y-1.5">
-              <Label>Ciudad</Label>
-              <Input {...register('city')} />
+              <Label htmlFor="city">Ciudad</Label>
+              <Input id="city" {...register('city')} />
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label>Notas internas</Label>
-            <Input {...register('notes')} />
+            <Label htmlFor="notes">Notas internas</Label>
+            <Input id="notes" {...register('notes')} />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>

@@ -7,6 +7,7 @@ import {
   ValidateNested,
   IsEnum,
   Matches,
+  IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { DayOfWeek } from '@prisma/client';
@@ -59,4 +60,20 @@ export class CreateScheduleExceptionDto {
   @IsOptional()
   @IsString()
   reason?: string;
+}
+
+export class SetEmployeeServicesDto {
+  @IsArray()
+  @IsUUID('all', { each: true })
+  serviceIds: string[];
+}
+
+export class ExceptionsQueryDto {
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'from must be in YYYY-MM-DD format' })
+  from?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'to must be in YYYY-MM-DD format' })
+  to?: string;
 }

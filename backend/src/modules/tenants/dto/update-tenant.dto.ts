@@ -12,6 +12,7 @@ import {
   IsObject,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IsTimeZone } from '../../../common/validators/is-time-zone.decorator';
 
 export class BookingSettingsDto {
   @IsOptional()
@@ -95,6 +96,7 @@ export class UpdateTenantDto {
   @IsOptional()
   @IsString()
   @MaxLength(50)
+  @IsTimeZone()
   timezone?: string;
 
   @IsOptional()

@@ -43,7 +43,7 @@ export default function LandingPage() {
       <section className="pt-24 pb-20 px-6 text-center">
         <div className="mx-auto max-w-3xl">
           <span className="inline-block rounded-full bg-blue-50 px-4 py-1.5 text-xs font-semibold text-blue-700 mb-6">
-            14 días de prueba gratuita · Sin tarjeta de crédito
+            14 días gratis del plan Profesional · Sin tarjeta de crédito
           </span>
           <h1 className="text-5xl md:text-6xl font-extrabold leading-tight tracking-tight mb-6">
             Gestiona tus citas.<br />
@@ -134,7 +134,10 @@ export default function LandingPage() {
                 )}
                 <h3 className={`text-xl font-bold mb-1 ${p.highlight ? 'text-white' : ''}`}>{p.name}</h3>
                 <p className={`text-4xl font-extrabold mt-2 mb-1 ${p.highlight ? 'text-white' : 'text-gray-900'}`}>
-                  {p.price}<span className={`text-base font-normal ${p.highlight ? 'text-blue-200' : 'text-gray-400'}`}>/mes</span>
+                  {p.price}
+                  {p.price !== 'Gratis' && (
+                    <span className={`text-base font-normal ${p.highlight ? 'text-blue-200' : 'text-gray-400'}`}>/mes</span>
+                  )}
                 </p>
                 <p className={`text-sm mb-6 ${p.highlight ? 'text-blue-100' : 'text-gray-500'}`}>{p.desc}</p>
                 <ul className="space-y-2.5 mb-8 flex-1">
@@ -158,6 +161,13 @@ export default function LandingPage() {
               </div>
             ))}
           </div>
+          <p className="text-center text-sm text-gray-500 mt-10">
+            ¿Más de 20 empleados?{' '}
+            <a href="mailto:info@rutapro.es?subject=Plan a medida" className="font-medium text-blue-600 hover:underline">
+              Contacta con nosotros
+            </a>{' '}
+            y te preparamos un plan a medida.
+          </p>
         </div>
       </section>
 
@@ -203,7 +213,7 @@ export default function LandingPage() {
           <div className="flex gap-6">
             <a href="#" className="hover:text-gray-900 transition-colors">Privacidad</a>
             <a href="#" className="hover:text-gray-900 transition-colors">Términos</a>
-            <a href="mailto:soporte@saascitas.com" className="hover:text-gray-900 transition-colors">Soporte</a>
+            <a href="mailto:info@rutapro.es" className="hover:text-gray-900 transition-colors">Soporte</a>
           </div>
         </div>
       </footer>
@@ -229,7 +239,7 @@ const features = [
   {
     icon: Bell,
     title: 'Recordatorios automáticos',
-    desc: 'Envía confirmaciones y recordatorios por email y SMS para reducir las cancelaciones de última hora.',
+    desc: 'Envía confirmaciones y recordatorios por email para reducir las cancelaciones de última hora.',
     bg: 'bg-amber-50',
     color: 'text-amber-600',
   },
@@ -259,7 +269,7 @@ const features = [
 const plans = [
   {
     name: 'Básico',
-    price: '19€',
+    price: 'Gratis',
     desc: 'Para autónomos que empiezan',
     highlight: false,
     features: [
@@ -272,13 +282,13 @@ const plans = [
   },
   {
     name: 'Profesional',
-    price: '49€',
+    price: '29€',
     desc: 'Para equipos en crecimiento',
     highlight: true,
     features: [
       'Citas ilimitadas',
       'Hasta 5 empleados',
-      'Recordatorios SMS + email',
+      'Recordatorios por email',
       'Métricas avanzadas',
       'Exportación CSV',
       'Soporte prioritario',
@@ -286,12 +296,12 @@ const plans = [
   },
   {
     name: 'Business',
-    price: '99€',
+    price: '79€',
     desc: 'Para negocios grandes',
     highlight: false,
     features: [
       'Citas ilimitadas',
-      'Empleados ilimitados',
+      'Hasta 20 empleados',
       'API acceso',
       'Integraciones (Zapier, etc.)',
       'Manager de cuenta dedicado',
@@ -303,7 +313,7 @@ const plans = [
 const faqs = [
   {
     q: '¿Necesito tarjeta de crédito para el periodo de prueba?',
-    a: 'No. Puedes probar SaaS Citas durante 14 días de forma completamente gratuita y sin introducir ningún dato de pago. Solo te pediremos la tarjeta si decides continuar al finalizar el periodo.',
+    a: 'No. Durante 14 días tienes el plan Profesional gratis y sin introducir ningún dato de pago. Si al terminar no contratas, pasas automáticamente al plan Básico gratuito sin perder nada; solo te pediremos la tarjeta si decides seguir con el Profesional.',
   },
   {
     q: '¿Puedo cancelar en cualquier momento?',

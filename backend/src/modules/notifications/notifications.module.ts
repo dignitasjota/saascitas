@@ -14,6 +14,7 @@ import { NOTIFICATIONS_QUEUE } from './notifications.constants';
         connection: {
           host: config.get('REDIS_HOST', 'localhost'),
           port: config.get<number>('REDIS_PORT', 6379),
+          password: config.get<string>('REDIS_PASSWORD') || undefined,
         },
       }),
       inject: [ConfigService],

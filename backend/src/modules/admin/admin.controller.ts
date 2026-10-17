@@ -6,9 +6,10 @@ import {
   Param,
   Body,
   Query,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { AdminService } from './admin.service';
-import { UpdateTenantPlanDto } from './dto/update-tenant-plan.dto';
+import { ListTenantsQueryDto, UpdateTenantPlanDto } from './dto/update-tenant-plan.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 
 @Controller('admin')
@@ -24,24 +25,20 @@ export class AdminController {
 
   @Get('tenants')
   async listTenants(
-    @Query('search') search?: string,
-    @Query('plan') plan?: string,
-    @Query('status') status?: string,
-    @Query('limit') limit?: number,
-    @Query('cursor') cursor?: string,
+    @Query() query: ListTenantsQueryDto,
   ) {
-    return this.adminService.listTenants({ search, plan, status, limit, cursor });
+    return this.adminService.listTenants(query);
   }
 
   @Get('tenants/:id')
-  async getTenant(@Param('id') id: string) {
+  async getTenant(@Param('id', ParseUUIDPipe) id: string) {
     const data = await this.adminService.getTenant(id);
     return { data };
   }
 
   @Patch('tenants/:id')
   async updateTenant(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateTenantPlanDto,
   ) {
     const data = await this.adminService.updateTenant(id, dto);
@@ -49,7 +46,7 @@ export class AdminController {
   }
 
   @Post('tenants/:id/suspend')
-  async suspendTenant(@Param('id') id: string) {
+  async suspendTenant(@Param('id', ParseUUIDPipe) id: string) {
     const data = await this.adminService.suspendTenant(id);
     return { data };
   }

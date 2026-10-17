@@ -14,7 +14,7 @@ datasource db {
 enum SubscriptionPlan {
   basic
   professional
-  premium
+  business
 }
 
 enum SubscriptionStatus {
@@ -89,6 +89,8 @@ model Tenant {
   plan                   SubscriptionPlan   @default(basic)
   planStatus             SubscriptionStatus @default(trialing) @map("plan_status")
   trialEndsAt            DateTime?          @map("trial_ends_at") @db.Timestamptz
+  // Set when the "your trial ends in N days" email was sent (avoids repeats).
+  trialReminderSentAt    DateTime?          @map("trial_reminder_sent_at") @db.Timestamptz
   stripeCustomerId       String?            @map("stripe_customer_id") @db.VarChar(255)
   stripeSubscriptionId   String?            @map("stripe_subscription_id") @db.VarChar(255)
 
@@ -154,9 +156,12 @@ model User {
   refreshTokens RefreshToken[]
   auditLogs     AuditLog[]
 
-  @@unique([email, tenantId])
   @@index([tenantId])
   @@index([email])
+  // NOTE: emails are unique across the whole platform among active users,
+  // enforced by the partial unique index `users_email_active_key` on
+  // lower(email) WHERE deleted_at IS NULL (migration `*_user_email_unique_active`).
+  // Prisma cannot model partial indexes, so it must not be dropped.
   @@map("users")
 }
 
@@ -325,6 +330,10 @@ model Customer {
 
   @@index([tenantId])
   @@index([tenantId, phone])
+  // NOTE: a partial unique index `customers_tenant_phone_active` on
+  // (tenant_id, phone) WHERE deleted_at IS NULL prevents duplicate active
+  // customers per tenant. Prisma cannot model partial indexes, so it lives in
+  // the migration `*_customer_unique_phone` and must not be dropped.
   @@map("customers")
 }
 
@@ -375,6 +384,10 @@ model Appointment {
   @@index([tenantId, employeeId, startsAt])
   @@index([tenantId, customerId, startsAt])
   @@index([tenantId, status, startsAt])
+  // NOTE: a GiST exclusion constraint `appointments_no_overlap` prevents
+  // overlapping active appointments for the same employee. Prisma cannot model
+  // exclusion constraints, so it lives in the migration
+  // `*_appointments_no_overlap_exclusion` and must not be dropped.
   @@map("appointments")
 }
 
@@ -494,4 +507,19 @@ model AuditLog {
   @@index([tenantId, entityType, entityId])
   @@index([tenantId, createdAt(sort: Desc)])
   @@map("audit_logs")
+}
+
+// ============================================
+// STRIPE EVENTS (webhook idempotency)
+// ============================================
+
+// Records processed Stripe webhook event ids so at-least-once redeliveries are
+// not applied twice. Platform-global (no tenantId), so it is intentionally NOT
+// tenant-scoped by the Prisma tenant-guard extension.
+model StripeEvent {
+  id          String   @id @db.VarChar(255) // Stripe event.id (evt_...)
+  type        String   @db.VarChar(100)
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz
+
+  @@map("stripe_events")
 }

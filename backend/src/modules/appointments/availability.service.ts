@@ -1,6 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { DayOfWeek } from '@prisma/client';
+import {
+  zonedWallTimeToUtc,
+  civilDayOfWeek,
+  startOfDayUtc,
+  endOfDayUtc,
+} from '../../common/utils/timezone';
+
+const DEFAULT_TZ = 'Europe/Madrid';
 
 export interface TimeSlot {
   start: string; // "09:00"
@@ -31,15 +39,33 @@ export class AvailabilityService {
     date: string,
     durationMinutes: number,
   ): Promise<TimeSlot[]> {
-    const targetDate = new Date(date);
-    const dayOfWeek = DAY_MAP[targetDate.getDay()];
+    // Business timezone + booking settings. Slots and day-of-week are
+    // wall-clock in the tenant's zone, not the server's. `date` is a civil
+    // date (YYYY-MM-DD).
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { timezone: true, bookingSettings: true },
+    });
+    const tz = tenant?.timezone ?? DEFAULT_TZ;
+    const settings = (tenant?.bookingSettings as any) ?? {};
+
+    // Grid granularity: how far apart slot start times are. Defaults to the
+    // service duration (back-to-back) when unset.
+    const stepMinutes =
+      settings.slotDurationMinutes > 0
+        ? settings.slotDurationMinutes
+        : durationMinutes;
+    // Minimum gap required between appointments (e.g. travel time).
+    const bufferMs = (settings.bufferMinutes ?? 0) * 60 * 1000;
+
+    const dayOfWeek = DAY_MAP[civilDayOfWeek(date)];
 
     // 1. Check for schedule exceptions on this date
     const exception = await this.prisma.scheduleException.findFirst({
       where: {
         employeeId,
         tenantId,
-        date: targetDate,
+        date: new Date(`${date}T00:00:00.000Z`), // @db.Date is stored at UTC midnight
       },
     });
 
@@ -71,16 +97,18 @@ export class AvailabilityService {
       workingPeriods = hours.map((h) => ({ start: h.startTime, end: h.endTime }));
     }
 
-    // 3. Get existing appointments for this date
-    const dayStart = new Date(date + 'T00:00:00');
-    const dayEnd = new Date(date + 'T23:59:59');
+    // 3. Get existing appointments that OVERLAP this civil day (tenant tz),
+    // widened by the buffer: one starting the evening before and running past
+    // midnight, or one right after midnight within the buffer, still blocks.
+    const dayStart = startOfDayUtc(date, tz);
+    const dayEnd = endOfDayUtc(date, tz);
 
     const existingAppointments = await this.prisma.appointment.findMany({
       where: {
         employeeId,
         tenantId,
-        startsAt: { gte: dayStart },
-        endsAt: { lte: dayEnd },
+        startsAt: { lt: new Date(dayEnd.getTime() + bufferMs) },
+        endsAt: { gt: new Date(dayStart.getTime() - bufferMs) },
         status: { notIn: ['cancelled', 'no_show'] },
       },
       select: { startsAt: true, endsAt: true },
@@ -95,14 +123,20 @@ export class AvailabilityService {
         period.start,
         period.end,
         durationMinutes,
+        stepMinutes,
       );
 
       for (const slot of periodSlots) {
-        const slotStart = new Date(`${date}T${slot.start}:00`);
-        const slotEnd = new Date(`${date}T${slot.end}:00`);
+        const slotStart = zonedWallTimeToUtc(date, slot.start, tz);
+        const slotEnd = zonedWallTimeToUtc(date, slot.end, tz);
 
+        // A slot conflicts if it overlaps an existing appointment expanded by
+        // the required buffer on both sides.
         const hasConflict = existingAppointments.some((appt) => {
-          return slotStart < appt.endsAt && slotEnd > appt.startsAt;
+          return (
+            slotStart.getTime() < appt.endsAt.getTime() + bufferMs &&
+            slotEnd.getTime() + bufferMs > appt.startsAt.getTime()
+          );
         });
 
         slots.push({
@@ -145,16 +179,20 @@ export class AvailabilityService {
   }
 
   /**
-   * Generate time slots within a period.
-   * Example: generateSlots("09:00", "14:00", 60) →
-   *   [{start:"09:00",end:"10:00"}, {start:"10:00",end:"11:00"}, ...]
+   * Generate time slots within a period. Each slot lasts `durationMinutes`;
+   * start times advance by `stepMinutes` (the grid granularity, which defaults
+   * to the duration for back-to-back slots).
+   * Example: generateSlots("09:00", "14:00", 60, 30) →
+   *   [{09:00→10:00}, {09:30→10:30}, {10:00→11:00}, ...]
    */
   private generateSlots(
     periodStart: string,
     periodEnd: string,
     durationMinutes: number,
+    stepMinutes: number = durationMinutes,
   ): { start: string; end: string }[] {
     const slots: { start: string; end: string }[] = [];
+    const step = stepMinutes > 0 ? stepMinutes : durationMinutes;
 
     let currentMinutes = this.timeToMinutes(periodStart);
     const endMinutes = this.timeToMinutes(periodEnd);
@@ -164,7 +202,7 @@ export class AvailabilityService {
         start: this.minutesToTime(currentMinutes),
         end: this.minutesToTime(currentMinutes + durationMinutes),
       });
-      currentMinutes += durationMinutes;
+      currentMinutes += step;
     }
 
     return slots;

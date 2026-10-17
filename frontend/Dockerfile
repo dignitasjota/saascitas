@@ -2,8 +2,12 @@
 FROM node:20-alpine AS deps
 
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
+# Built in isolation (build context is ./frontend), so there is no root
+# lockfile here; use `npm install` rather than `npm ci`. --ignore-scripts skips
+# dependency lifecycle hooks (not needed for a pure-JS frontend) and avoids a
+# hanging postinstall.
+COPY package.json ./
+RUN npm install --ignore-scripts --no-audit --no-fund
 
 # ── Stage 2: build ────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
@@ -21,19 +25,24 @@ RUN npm run build
 # ── Stage 3: production ────────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
 
-RUN apk add --no-cache dumb-init
+RUN apk add --no-cache dumb-init wget
 
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# next standalone output
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+# next standalone output, owned by the non-root user
+COPY --from=builder --chown=node:node /app/public ./public
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+
+USER node
 
 EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "server.js"]

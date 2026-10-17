@@ -8,12 +8,21 @@ import {
   Param,
   Query,
   Res,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { CustomersService } from './customers.service';
-import { CreateCustomerDto, UpdateCustomerDto } from './dto/create-customer.dto';
+import {
+  CreateCustomerDto,
+  ListCustomersQueryDto,
+  UpdateCustomerDto,
+} from './dto/create-customer.dto';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
+// All staff roles may read and manage customers; bulk export and deletion are
+// restricted to owners/admins (see per-method overrides below).
+@Roles('owner', 'admin', 'technician')
 @Controller('customers')
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
@@ -21,13 +30,12 @@ export class CustomersController {
   @Get()
   async findAll(
     @CurrentUser() user: JwtPayload,
-    @Query('search') search?: string,
-    @Query('limit') limit?: number,
-    @Query('cursor') cursor?: string,
+    @Query() { search, limit, cursor }: ListCustomersQueryDto,
   ) {
     return this.customersService.findAll(user.tid, search, limit, cursor);
   }
 
+  @Roles('owner', 'admin')
   @Get('export')
   async exportCsv(
     @CurrentUser() user: JwtPayload,
@@ -43,7 +51,7 @@ export class CustomersController {
   @Get(':id')
   async findOne(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const customer = await this.customersService.findById(user.tid, id);
     return { data: customer };
@@ -61,17 +69,18 @@ export class CustomersController {
   @Patch(':id')
   async update(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCustomerDto,
   ) {
     const customer = await this.customersService.update(user.tid, id, dto);
     return { data: customer };
   }
 
+  @Roles('owner', 'admin')
   @Delete(':id')
   async remove(
     @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     await this.customersService.remove(user.tid, id);
     return { data: { message: 'Customer removed' } };

@@ -4,7 +4,7 @@ import {
   IsEmail,
   IsOptional,
   IsUUID,
-  IsDateString,
+  Matches,
   MaxLength,
 } from 'class-validator';
 
@@ -15,11 +15,12 @@ export class CreateBookingDto {
   @IsUUID()
   employeeId: string;
 
-  @IsDateString()
+  // A civil date, not a full ISO timestamp: "2026-03-15T10:00Z" would pass
+  // @IsDateString but breaks the wall-clock → UTC conversion (NaN dates).
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date must be in YYYY-MM-DD format' })
   date: string;   // "2026-03-15"
 
-  @IsString()
-  @IsNotEmpty()
+  @Matches(/^\d{2}:\d{2}$/, { message: 'slot must be in HH:MM format' })
   slot: string;   // "10:00"
 
   // Customer data
@@ -46,4 +47,28 @@ export class CreateBookingDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+}
+
+export class CancelBookingDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}
+
+export class PublicEmployeesQueryDto {
+  @IsOptional()
+  @IsUUID()
+  serviceId?: string;
+}
+
+export class PublicSlotsQueryDto {
+  @IsUUID()
+  employeeId: string;
+
+  @IsUUID()
+  serviceId: string;
+
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date must be in YYYY-MM-DD format' })
+  date: string;
 }

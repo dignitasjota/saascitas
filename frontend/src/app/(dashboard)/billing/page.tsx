@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
+import { toast } from 'sonner'
 import {
   CheckCircle2,
   XCircle,
@@ -13,12 +14,14 @@ import {
   Loader2,
   AlertTriangle,
   CalendarClock,
+  CalendarDays,
   Users,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import apiClient from '@/lib/api-client'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -35,7 +38,10 @@ interface BillingStatus {
   hasActiveSubscription: boolean
   currentPeriodEnd: string | null
   cancelAtPeriodEnd: boolean
+  monthlyAppointments?: { month: string; used: number; limit: number | null }
 }
+
+const SALES_EMAIL = 'info@rutapro.es'
 
 // ─── Plan definitions ────────────────────────────────────────────────────────
 
@@ -56,6 +62,7 @@ const PLANS: {
     maxEmployees: 1,
     features: [
       '1 empleado',
+      'Hasta 100 citas/mes',
       'Reservas online',
       'Notificaciones por email',
       'Panel de métricas',
@@ -118,17 +125,22 @@ function PlanCard({
   onUpgrade,
   upgrading,
   hasSubscription,
+  trialing,
 }: {
   plan: (typeof PLANS)[number]
   current: PlanKey
   onUpgrade: (plan: PlanKey) => void
   upgrading: PlanKey | null
   hasSubscription: boolean
+  trialing: boolean
 }) {
   const isCurrent = plan.key === current
   const isLoading = upgrading === plan.key
 
-  const canUpgrade = !isCurrent && plan.key !== 'basic' && !hasSubscription
+  // During the free trial the current plan (Professional) is not paid yet,
+  // so it can still be contracted.
+  const canUpgrade =
+    plan.key !== 'basic' && !hasSubscription && (!isCurrent || trialing)
 
   return (
     <div
@@ -151,7 +163,7 @@ function PlanCard({
       {isCurrent && (
         <div className="absolute -top-3 left-1/2 -translate-x-1/2">
           <span className="bg-green-600 text-white text-xs font-semibold px-3 py-1 rounded-full">
-            Plan actual
+            {trialing ? 'En prueba' : 'Plan actual'}
           </span>
         </div>
       )}
@@ -222,7 +234,7 @@ export default function BillingPage() {
   const [upgrading, setUpgrading] = useState<PlanKey | null>(null)
   const [portalLoading, setPortalLoading] = useState(false)
 
-  const { data: billing, isLoading } = useQuery<BillingStatus>({
+  const { data: billing, isLoading, isError, refetch } = useQuery<BillingStatus>({
     queryKey: ['billing-status'],
     queryFn: async () => {
       const res = await apiClient.get('/billing/status')
@@ -253,6 +265,8 @@ export default function BillingPage() {
     try {
       const res = await apiClient.post('/billing/portal')
       window.location.href = res.data.data.url
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'No se pudo abrir el portal de facturación')
     } finally {
       setPortalLoading(false)
     }
@@ -270,7 +284,22 @@ export default function BillingPage() {
     )
   }
 
+  if (isError) {
+    return (
+      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Facturación y plan</h1>
+          <p className="text-muted-foreground mt-1">
+            Gestiona tu suscripción y métodos de pago
+          </p>
+        </div>
+        <ErrorState message="No se pudo cargar la información de facturación" onRetry={() => refetch()} />
+      </div>
+    )
+  }
+
   const currentPlan = billing?.plan ?? 'basic'
+  const isTrialing = billing?.planStatus === 'trialing' && !billing?.hasActiveSubscription
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
@@ -320,6 +349,12 @@ export default function BillingPage() {
                     <Users className="h-4 w-4" />
                     Hasta {billing.maxEmployees} empleado{billing.maxEmployees !== 1 ? 's' : ''}
                   </span>
+                  {billing.monthlyAppointments?.limit != null && (
+                    <span className="flex items-center gap-1">
+                      <CalendarDays className="h-4 w-4" />
+                      {billing.monthlyAppointments.used} / {billing.monthlyAppointments.limit} citas este mes
+                    </span>
+                  )}
                   {billing.trialEndsAt && billing.planStatus === 'trialing' && (
                     <span className="flex items-center gap-1">
                       <CalendarClock className="h-4 w-4" />
@@ -353,12 +388,33 @@ export default function BillingPage() {
             )}
           </div>
 
+          {isTrialing && billing.trialEndsAt && (
+            <div className="mt-4 flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-blue-800 text-sm">
+              <CalendarClock className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                Estás probando gratis el plan Profesional hasta el{' '}
+                {format(new Date(billing.trialEndsAt), "d 'de' MMMM", { locale: es })}. Si no
+                contratas, pasarás automáticamente al plan Básico gratuito (1 empleado y 100
+                citas al mes) sin perder ningún dato.
+              </span>
+            </div>
+          )}
+
           {billing.cancelAtPeriodEnd && (
             <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-700 text-sm">
               <AlertTriangle className="h-4 w-4 shrink-0" />
               Tu suscripción se cancelará al final del período. Puedes reactivarla desde el portal.
             </div>
           )}
+
+          {billing.monthlyAppointments?.limit != null &&
+            billing.monthlyAppointments.used >= billing.monthlyAppointments.limit && (
+              <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-700 text-sm">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                Has alcanzado las {billing.monthlyAppointments.limit} citas de este mes. No se aceptan más
+                reservas online hasta el mes que viene; mejora tu plan para tener citas ilimitadas.
+              </div>
+            )}
 
           {billing.planStatus === 'past_due' && (
             <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-red-700 text-sm">
@@ -381,10 +437,19 @@ export default function BillingPage() {
               onUpgrade={handleUpgrade}
               upgrading={upgrading}
               hasSubscription={billing?.hasActiveSubscription ?? false}
+              trialing={isTrialing}
             />
           ))}
         </div>
       </div>
+
+      <p className="text-center text-sm text-muted-foreground">
+        ¿Necesitas más de 20 empleados?{' '}
+        <a href={`mailto:${SALES_EMAIL}?subject=Plan a medida`} className="underline hover:text-foreground">
+          Contacta con nosotros
+        </a>{' '}
+        y te preparamos un plan a medida.
+      </p>
 
       {/* Manage from portal note */}
       {billing?.hasActiveSubscription && (

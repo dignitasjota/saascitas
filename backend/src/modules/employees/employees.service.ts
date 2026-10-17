@@ -17,6 +17,7 @@ export class EmployeesService {
   async findAll(tenantId: string) {
     return this.prisma.employee.findMany({
       where: { tenantId, deletedAt: null },
+      include: { employeeServices: { select: { serviceId: true } } },
       orderBy: { createdAt: 'asc' },
     });
   }
@@ -43,36 +44,72 @@ export class EmployeesService {
       where: { id: tenantId },
     });
 
-    const employeeCount = await this.prisma.employee.count({
-      where: { tenantId, deletedAt: null },
-    });
+    // The plan limit is on ACTIVE employees: after a downgrade the extra
+    // ones are deactivated (kept, not deleted) and don't count.
+    await this.assertActiveEmployeeSlot(tenantId, tenant?.maxEmployees);
 
-    if (tenant && employeeCount >= tenant.maxEmployees) {
-      throw new BadRequestException(
-        `Your plan allows a maximum of ${tenant.maxEmployees} employee(s). Upgrade to add more.`,
-      );
-    }
+    // New employees offer every active service by default, so they are
+    // bookable online straight away (the owner can narrow it down later).
+    return this.prisma.$transaction(async (tx) => {
+      const employee = await tx.employee.create({
+        data: {
+          tenantId,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          email: dto.email,
+          phone: dto.phone,
+          color: dto.color,
+          specialties: dto.specialties || [],
+        },
+      });
 
-    return this.prisma.employee.create({
-      data: {
-        tenantId,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        email: dto.email,
-        phone: dto.phone,
-        color: dto.color,
-        specialties: dto.specialties || [],
-      },
+      const services = await tx.service.findMany({
+        where: { tenantId, isActive: true, deletedAt: null },
+        select: { id: true },
+      });
+      if (services.length > 0) {
+        await tx.employeeService.createMany({
+          data: services.map((s) => ({
+            tenantId,
+            employeeId: employee.id,
+            serviceId: s.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      return employee;
     });
   }
 
   async update(tenantId: string, id: string, dto: UpdateEmployeeDto) {
-    await this.findById(tenantId, id); // Verify exists + tenant
+    const employee = await this.findById(tenantId, id); // Verify exists + tenant
+
+    // Reactivating must fit the plan (e.g. Basic after the trial: 1 active).
+    if (dto.isActive === true && !employee.isActive) {
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { maxEmployees: true },
+      });
+      await this.assertActiveEmployeeSlot(tenantId, tenant?.maxEmployees);
+    }
 
     return this.prisma.employee.update({
       where: { id },
       data: dto,
     });
+  }
+
+  private async assertActiveEmployeeSlot(tenantId: string, maxEmployees?: number) {
+    if (maxEmployees === undefined) return;
+    const active = await this.prisma.employee.count({
+      where: { tenantId, isActive: true, deletedAt: null },
+    });
+    if (active >= maxEmployees) {
+      throw new BadRequestException(
+        `Tu plan permite ${maxEmployees} empleado(s) activo(s). Desactiva otro o mejora tu plan.`,
+      );
+    }
   }
 
   async remove(tenantId: string, id: string) {
@@ -81,6 +118,41 @@ export class EmployeesService {
     return this.prisma.employee.update({
       where: { id },
       data: { deletedAt: new Date() },
+    });
+  }
+
+  // ========================================
+  // Services offered
+  // ========================================
+
+  /**
+   * Replace the set of services an employee offers. Public booking only
+   * lists/accepts employees linked to the chosen service.
+   */
+  async setServices(tenantId: string, employeeId: string, serviceIds: string[]) {
+    await this.findById(tenantId, employeeId);
+
+    const uniqueIds = [...new Set(serviceIds)];
+    if (uniqueIds.length > 0) {
+      const count = await this.prisma.service.count({
+        where: { id: { in: uniqueIds }, tenantId, deletedAt: null },
+      });
+      if (count !== uniqueIds.length) {
+        throw new BadRequestException('One or more services were not found');
+      }
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.employeeService.deleteMany({ where: { employeeId, tenantId } });
+      if (uniqueIds.length > 0) {
+        await tx.employeeService.createMany({
+          data: uniqueIds.map((serviceId) => ({ tenantId, employeeId, serviceId })),
+        });
+      }
+      return tx.employeeService.findMany({
+        where: { employeeId, tenantId },
+        select: { serviceId: true },
+      });
     });
   }
 

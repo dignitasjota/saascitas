@@ -3,14 +3,13 @@
 -- Run after Prisma migrations: psql $DATABASE_URL -f prisma/rls.sql
 -- ============================================
 
--- Create application role (non-superuser, RLS applies)
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN
-    CREATE ROLE app_user LOGIN PASSWORD 'app_user_password';
-  END IF;
-END
-$$;
+-- Create application role (non-superuser, RLS applies). The password is passed
+-- as a psql variable so no secret is committed to the repo:
+--   psql "$DATABASE_URL" -v app_user_password="$APP_USER_PASSWORD" -f prisma/rls.sql
+-- %L quotes it safely; the role is created only if it doesn't already exist.
+SELECT format('CREATE ROLE app_user LOGIN PASSWORD %L', :'app_user_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user')
+\gexec
 
 -- Grant permissions to app_user
 GRANT USAGE ON SCHEMA public TO app_user;
@@ -72,6 +71,13 @@ CREATE POLICY tenant_isolation_refresh_tokens ON refresh_tokens
 CREATE POLICY tenant_isolation_audit_logs ON audit_logs
   USING (tenant_id = current_setting('app.current_tenant_id', true)::UUID);
 
--- Note: The superuser (saascitas) used by Prisma bypasses RLS.
--- In production, the app should connect as app_user for RLS enforcement.
--- During development, we rely on the Prisma middleware layer for tenant filtering.
+-- Note: The database owner used by Prisma bypasses RLS unless the tables use
+-- FORCE ROW LEVEL SECURITY and the session sets app.current_tenant_id inside a
+-- transaction. This script is an OPTIONAL extra hardening layer for production
+-- (connect the app as the non-owner app_user for it to take effect).
+--
+-- The PRIMARY tenant isolation now runs at the application layer: the Prisma
+-- `tenant-guard` extension (src/common/prisma/tenant-extension.ts) injects the
+-- current tenant (from the per-request AsyncLocalStorage context) into every
+-- query against a tenant-scoped model. See tenant-guard.int-spec.ts for the
+-- verified behaviour.

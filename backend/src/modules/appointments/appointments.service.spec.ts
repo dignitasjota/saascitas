@@ -2,10 +2,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import {
   NotFoundException,
   ConflictException,
+  ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
 import { AvailabilityService } from './availability.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -44,19 +46,25 @@ describe('AppointmentsService', () => {
   let prisma: any;
   let availability: jest.Mocked<AvailabilityService>;
 
-  const mockPrisma = {
+  const mockPrisma: any = {
     appointment: {
       findMany: jest.fn(),
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
+      count: jest.fn(),
     },
+    tenant: { findUnique: jest.fn() },
     service: { findFirst: jest.fn() },
     employee: { findFirst: jest.fn() },
     customer: {
       findFirst: jest.fn(),
       update: jest.fn(),
     },
+    // Interactive transaction: run the callback with the mock itself as `tx`.
+    $transaction: jest.fn((fn: any) => fn(mockPrisma)),
   };
 
   const mockAvailability = {
@@ -64,14 +72,25 @@ describe('AppointmentsService', () => {
     getAvailableSlots: jest.fn(),
   };
 
+  const mockNotifications = {
+    rescheduleReminder: jest.fn().mockResolvedValue(undefined),
+    cancelReminder: jest.fn().mockResolvedValue(undefined),
+    queueBookingReminder: jest.fn().mockResolvedValue(undefined),
+    queueBookingConfirmation: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
+    // Default: unlimited plan, nothing booked this month.
+    mockPrisma.tenant.findUnique.mockResolvedValue({ plan: 'professional', timezone: 'Europe/Madrid' });
+    mockPrisma.appointment.count.mockResolvedValue(0);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AppointmentsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AvailabilityService, useValue: mockAvailability },
+        { provide: NotificationsService, useValue: mockNotifications },
       ],
     }).compile();
 
@@ -194,6 +213,23 @@ describe('AppointmentsService', () => {
       );
     });
 
+    it('enforces the monthly appointment quota of the plan', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({ plan: 'basic', timezone: 'Europe/Madrid' });
+      mockPrisma.appointment.count.mockResolvedValue(100);
+
+      await expect(service.create(TENANT, dto)).rejects.toThrow(ForbiddenException);
+      expect(mockPrisma.appointment.create).not.toHaveBeenCalled();
+    });
+
+    it('queues the 24h reminder for manual appointments', async () => {
+      await service.create(TENANT, dto);
+
+      expect(mockNotifications.queueBookingReminder).toHaveBeenCalledWith(
+        'appt-1',
+        expect.any(Date),
+      );
+    });
+
     it('throws BadRequestException when service not found', async () => {
       mockPrisma.service.findFirst.mockResolvedValue(null);
 
@@ -244,6 +280,18 @@ describe('AppointmentsService', () => {
         }),
       );
     });
+
+    it('maps the DB overlap exclusion violation to ConflictException (race safety net)', async () => {
+      mockPrisma.appointment.create.mockRejectedValue({
+        code: '23P01',
+        message:
+          'conflicting key value violates exclusion constraint "appointments_no_overlap"',
+      });
+
+      await expect(service.create(TENANT, dto)).rejects.toThrow(
+        ConflictException,
+      );
+    });
   });
 
   // ── updateStatus ────────────────────────────────────────────────────────────
@@ -252,9 +300,8 @@ describe('AppointmentsService', () => {
       mockPrisma.appointment.findFirst.mockResolvedValue(
         makeAppointment({ status: 'pending' }),
       );
-      mockPrisma.appointment.update.mockResolvedValue(
-        makeAppointment({ status: 'confirmed' }),
-      );
+      mockPrisma.appointment.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.appointment.findUniqueOrThrow.mockResolvedValue(makeAppointment({ status: 'confirmed' }));
 
       const result = await service.updateStatus(TENANT, 'appt-1', {
         status: 'confirmed',
@@ -286,14 +333,15 @@ describe('AppointmentsService', () => {
       mockPrisma.appointment.findFirst.mockResolvedValue(
         makeAppointment({ status: 'pending' }),
       );
-      mockPrisma.appointment.update.mockResolvedValue({});
+      mockPrisma.appointment.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.appointment.findUniqueOrThrow.mockResolvedValue({});
 
       await service.updateStatus(TENANT, 'appt-1', {
         status: 'cancelled',
         cancellationReason: 'Cliente no vino',
       });
 
-      expect(mockPrisma.appointment.update).toHaveBeenCalledWith(
+      expect(mockPrisma.appointment.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             cancelledAt: expect.any(Date),
@@ -301,6 +349,78 @@ describe('AppointmentsService', () => {
           }),
         }),
       );
+    });
+
+    it('cancels the queued reminder when cancelling', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'pending' }),
+      );
+      mockPrisma.appointment.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.appointment.findUniqueOrThrow.mockResolvedValue({});
+
+      await service.updateStatus(TENANT, 'appt-1', { status: 'cancelled' });
+
+      expect(mockNotifications.cancelReminder).toHaveBeenCalledWith('appt-1');
+    });
+
+    it('does not cancel the reminder for a non-cancel transition', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'pending' }),
+      );
+      mockPrisma.appointment.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.appointment.findUniqueOrThrow.mockResolvedValue({});
+
+      await service.updateStatus(TENANT, 'appt-1', { status: 'confirmed' });
+
+      expect(mockNotifications.cancelReminder).not.toHaveBeenCalled();
+    });
+
+    it('decrements the customer appointment count when cancelling', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'pending', customerId: 'cust-1' }),
+      );
+      mockPrisma.appointment.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.appointment.findUniqueOrThrow.mockResolvedValue({});
+
+      await service.updateStatus(TENANT, 'appt-1', { status: 'cancelled' });
+
+      expect(mockPrisma.customer.update).toHaveBeenCalledWith({
+        where: { id: 'cust-1' },
+        data: { totalAppointments: { decrement: 1 } },
+      });
+    });
+
+    it('adds the price to the customer total spent when completing', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'in_progress', customerId: 'cust-1', priceCents: 5000 }),
+      );
+      mockPrisma.appointment.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.appointment.findUniqueOrThrow.mockResolvedValue({});
+
+      await service.updateStatus(TENANT, 'appt-1', { status: 'completed' });
+
+      expect(mockPrisma.customer.update).toHaveBeenCalledWith({
+        where: { id: 'cust-1' },
+        data: { totalSpentCents: { increment: BigInt(5000) } },
+      });
+    });
+
+    it('applies the change only if the status is still the one validated', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(
+        makeAppointment({ status: 'pending', customerId: 'cust-1' }),
+      );
+      mockPrisma.appointment.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.updateStatus(TENANT, 'appt-1', { status: 'cancelled' }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockPrisma.appointment.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'appt-1', tenantId: TENANT, status: 'pending' },
+        }),
+      );
+      // No double decrement when a concurrent cancellation won the race.
+      expect(mockPrisma.customer.update).not.toHaveBeenCalled();
     });
   });
 
@@ -337,6 +457,68 @@ describe('AppointmentsService', () => {
           startsAt: new Date('2026-03-10T14:00:00.000Z').toISOString(),
         }),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('recomputes endsAt when only startsAt changes (no duration provided)', async () => {
+      // Base appointment: 10:00→11:00, duration 60. Moving startsAt to 14:00
+      // without a new duration must persist endsAt = 15:00, not the stale 11:00.
+      mockPrisma.appointment.findFirst.mockResolvedValue(makeAppointment());
+      mockAvailability.isSlotAvailable.mockResolvedValue(true);
+      mockPrisma.appointment.update.mockResolvedValue(makeAppointment());
+
+      const newStart = new Date('2026-03-10T14:00:00.000Z');
+      await service.update(TENANT, 'appt-1', {
+        startsAt: newStart.toISOString(),
+      });
+
+      expect(mockPrisma.appointment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            startsAt: newStart,
+            durationMinutes: 60,
+            endsAt: new Date('2026-03-10T15:00:00.000Z'),
+          }),
+        }),
+      );
+    });
+
+    it('maps the DB overlap exclusion violation to ConflictException (race safety net)', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(makeAppointment());
+      mockAvailability.isSlotAvailable.mockResolvedValue(true);
+      mockPrisma.appointment.update.mockRejectedValue({
+        code: '23P01',
+        message:
+          'conflicting key value violates exclusion constraint "appointments_no_overlap"',
+      });
+
+      await expect(
+        service.update(TENANT, 'appt-1', {
+          startsAt: new Date('2026-03-10T14:00:00.000Z').toISOString(),
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('reschedules the reminder to the new time', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(makeAppointment());
+      mockAvailability.isSlotAvailable.mockResolvedValue(true);
+      mockPrisma.appointment.update.mockResolvedValue(makeAppointment());
+
+      const newStart = new Date('2026-03-10T14:00:00.000Z');
+      await service.update(TENANT, 'appt-1', { startsAt: newStart.toISOString() });
+
+      expect(mockNotifications.rescheduleReminder).toHaveBeenCalledWith(
+        'appt-1',
+        newStart,
+      );
+    });
+
+    it('does not touch the reminder when only non-time fields change', async () => {
+      mockPrisma.appointment.findFirst.mockResolvedValue(makeAppointment());
+      mockPrisma.appointment.update.mockResolvedValue(makeAppointment());
+
+      await service.update(TENANT, 'appt-1', { notes: 'nueva nota' });
+
+      expect(mockNotifications.rescheduleReminder).not.toHaveBeenCalled();
     });
   });
 

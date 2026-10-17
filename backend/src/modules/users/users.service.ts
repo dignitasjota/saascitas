@@ -6,7 +6,9 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { hash, verify } from '@node-rs/argon2';
+import { createHash } from 'crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateProfileDto, ChangePasswordDto } from './dto/update-profile.dto';
@@ -50,9 +52,12 @@ export class UsersService {
   }
 
   async create(tenantId: string, dto: CreateUserDto) {
-    // Check unique email within tenant
+    // Emails identify the account at login across all tenants, so they must
+    // be unique platform-wide (not just within this tenant).
+    const email = dto.email.toLowerCase();
     const existing = await this.prisma.user.findFirst({
-      where: { email: dto.email.toLowerCase(), tenantId, deletedAt: null },
+      where: { email, deletedAt: null },
+      select: { id: true },
     });
     if (existing) throw new ConflictException('Email already in use');
 
@@ -71,21 +76,25 @@ export class UsersService {
 
     const passwordHash = await hash(dto.password, ARGON2_OPTIONS);
 
-    const user = await this.prisma.user.create({
-      data: {
-        tenantId,
-        email: dto.email.toLowerCase(),
-        passwordHash,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        phone: dto.phone,
-        role: dto.role,
-        employeeId: dto.employeeId ?? null,
-      },
-      select: USER_SELECT,
-    });
-
-    return user;
+    try {
+      return await this.prisma.user.create({
+        data: {
+          tenantId,
+          email,
+          passwordHash,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          phone: dto.phone,
+          role: dto.role,
+          employeeId: dto.employeeId ?? null,
+        },
+        select: USER_SELECT,
+      });
+    } catch (err) {
+      // Lost a race against a concurrent signup/creation with the same email.
+      if (isUniqueViolation(err)) throw new ConflictException('Email already in use');
+      throw err;
+    }
   }
 
   async update(tenantId: string, id: string, dto: UpdateUserDto, requesterId: string, requesterRole: string) {
@@ -153,7 +162,17 @@ export class UsersService {
     });
   }
 
-  async changePassword(tenantId: string, id: string, dto: ChangePasswordDto) {
+  /**
+   * Change the password and sign out every OTHER session (a stolen session
+   * must not survive the password change). `currentRefreshToken` is the
+   * caller's refresh cookie; its family is kept so they stay logged in.
+   */
+  async changePassword(
+    tenantId: string,
+    id: string,
+    dto: ChangePasswordDto,
+    currentRefreshToken?: string,
+  ) {
     const user = await this.prisma.user.findFirst({
       where: { id, tenantId, deletedAt: null },
       select: { id: true, passwordHash: true },
@@ -167,6 +186,25 @@ export class UsersService {
     await this.prisma.user.update({
       where: { id },
       data: { passwordHash: newHash },
+    });
+
+    const current = currentRefreshToken
+      ? await this.prisma.refreshToken.findFirst({
+          where: {
+            userId: id,
+            tokenHash: createHash('sha256').update(currentRefreshToken).digest('hex'),
+          },
+          select: { familyId: true },
+        })
+      : null;
+
+    await this.prisma.refreshToken.updateMany({
+      where: {
+        userId: id,
+        revokedAt: null,
+        ...(current && { familyId: { not: current.familyId } }),
+      },
+      data: { revokedAt: new Date() },
     });
   }
 

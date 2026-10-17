@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/ui/error-state'
 import { toast } from 'sonner'
 import apiClient from '@/lib/api-client'
 import { useAuthStore } from '@/stores/auth-store'
@@ -63,13 +64,13 @@ interface ProfileData {
 }
 
 function ProfileSection({ profile }: { profile: ProfileData }) {
-  const { user, setAuth, tenant, accessToken, refreshToken } = useAuthStore()
+  const { user, setAuth, tenant } = useAuthStore()
   const queryClient = useQueryClient()
 
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting, isDirty },
+    formState: { errors, isDirty },
     reset,
   } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
@@ -86,12 +87,10 @@ function ProfileSection({ profile }: { profile: ProfileData }) {
     onSuccess: (res) => {
       const updated = res.data.data
       // Update auth store so sidebar name reflects changes
-      if (user && tenant && accessToken && refreshToken) {
+      if (user && tenant) {
         setAuth(
           { ...user, firstName: updated.firstName, lastName: updated.lastName },
           tenant,
-          accessToken,
-          refreshToken,
         )
       }
       queryClient.setQueryData(['profile'], updated)
@@ -131,28 +130,28 @@ function ProfileSection({ profile }: { profile: ProfileData }) {
       <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
-            <Label>Nombre</Label>
-            <Input {...register('firstName')} />
+            <Label htmlFor="firstName">Nombre</Label>
+            <Input id="firstName" {...register('firstName')} />
             {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
           </div>
           <div className="space-y-1">
-            <Label>Apellidos</Label>
-            <Input {...register('lastName')} />
+            <Label htmlFor="lastName">Apellidos</Label>
+            <Input id="lastName" {...register('lastName')} />
             {errors.lastName && <p className="text-xs text-destructive">{errors.lastName.message}</p>}
           </div>
         </div>
 
         <div className="space-y-1">
-          <Label>Teléfono <span className="text-muted-foreground text-xs">(opcional)</span></Label>
-          <Input {...register('phone')} type="tel" placeholder="+34 600 000 000" />
+          <Label htmlFor="phone">Teléfono <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+          <Input id="phone" {...register('phone')} type="tel" placeholder="+34 600 000 000" />
         </div>
 
         <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
           Email: {profile.email} — no se puede cambiar desde aquí
         </div>
 
-        <Button type="submit" disabled={isSubmitting || !isDirty}>
-          {isSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+        <Button type="submit" disabled={mutation.isPending || !isDirty}>
+          {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
           Guardar cambios
         </Button>
       </form>
@@ -166,7 +165,7 @@ function PasswordSection() {
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting },
+    formState: { errors },
     reset,
   } = useForm<PasswordForm>({
     resolver: zodResolver(passwordSchema),
@@ -201,31 +200,31 @@ function PasswordSection() {
 
       <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4 max-w-sm">
         <div className="space-y-1">
-          <Label>Contraseña actual</Label>
-          <Input {...register('currentPassword')} type="password" autoComplete="current-password" />
+          <Label htmlFor="currentPassword">Contraseña actual</Label>
+          <Input id="currentPassword" {...register('currentPassword')} type="password" autoComplete="current-password" />
           {errors.currentPassword && (
             <p className="text-xs text-destructive">{errors.currentPassword.message}</p>
           )}
         </div>
 
         <div className="space-y-1">
-          <Label>Nueva contraseña</Label>
-          <Input {...register('newPassword')} type="password" autoComplete="new-password" />
+          <Label htmlFor="newPassword">Nueva contraseña</Label>
+          <Input id="newPassword" {...register('newPassword')} type="password" autoComplete="new-password" />
           {errors.newPassword && (
             <p className="text-xs text-destructive">{errors.newPassword.message}</p>
           )}
         </div>
 
         <div className="space-y-1">
-          <Label>Confirmar nueva contraseña</Label>
-          <Input {...register('confirmPassword')} type="password" autoComplete="new-password" />
+          <Label htmlFor="confirmPassword">Confirmar nueva contraseña</Label>
+          <Input id="confirmPassword" {...register('confirmPassword')} type="password" autoComplete="new-password" />
           {errors.confirmPassword && (
             <p className="text-xs text-destructive">{errors.confirmPassword.message}</p>
           )}
         </div>
 
-        <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+        <Button type="submit" disabled={mutation.isPending}>
+          {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
           Cambiar contraseña
         </Button>
       </form>
@@ -236,7 +235,7 @@ function PasswordSection() {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
-  const { data: profile, isLoading } = useQuery<ProfileData>({
+  const { data: profile, isLoading, isError, refetch } = useQuery<ProfileData>({
     queryKey: ['profile'],
     queryFn: async () => {
       const res = await apiClient.get('/users/me')
@@ -265,6 +264,8 @@ export default function ProfilePage() {
             <Skeleton className="h-10 w-full" />
           </Card>
         </div>
+      ) : isError ? (
+        <ErrorState message="No se pudo cargar tu perfil" onRetry={() => refetch()} />
       ) : profile ? (
         <>
           <ProfileSection profile={profile} />

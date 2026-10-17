@@ -12,6 +12,11 @@ const mockPrisma = {
     findFirst: jest.fn(),
     update: jest.fn(),
   },
+  stripeEvent: {
+    create: jest.fn(),
+    delete: jest.fn(),
+  },
+  appointment: { count: jest.fn().mockResolvedValue(0) },
 };
 
 const mockConfig = {
@@ -101,7 +106,7 @@ describe('BillingService', () => {
       ['unpaid', 'past_due'],
       ['canceled', 'cancelled'],
       ['trialing', 'trialing'],
-      ['paused', 'suspended'],
+      ['paused', 'paused'],
       ['incomplete', 'trialing'],
       ['incomplete_expired', 'cancelled'],
     ];
@@ -114,6 +119,131 @@ describe('BillingService', () => {
     it('unknown status defaults to active', () => {
       const result = (service as any).mapStripeStatus('some_unknown_status');
       expect(result).toBe('active');
+    });
+  });
+
+  // ─── handleWebhook idempotency ───────────────────────────────────────────────
+
+  describe('handleWebhook (idempotency)', () => {
+    const rawBody = Buffer.from('{}');
+    const sig = 'sig';
+
+    const event = {
+      id: 'evt_123',
+      type: 'invoice.payment_failed',
+      data: { object: { customer: 'cus_1' } },
+    };
+
+    beforeEach(() => {
+      stripe.webhooks.constructEvent.mockReturnValue(event);
+      mockPrisma.tenant.findFirst.mockResolvedValue({ id: TENANT_ID });
+      mockPrisma.tenant.update.mockResolvedValue({});
+    });
+
+    it('processes a new event and records its id', async () => {
+      mockPrisma.stripeEvent.create.mockResolvedValue({ id: event.id });
+
+      const res = await service.handleWebhook(rawBody, sig);
+
+      expect(res).toEqual({ received: true });
+      expect(mockPrisma.stripeEvent.create).toHaveBeenCalledWith({
+        data: { id: 'evt_123', type: 'invoice.payment_failed' },
+      });
+      // handler ran (past_due update)
+      expect(mockPrisma.tenant.update).toHaveBeenCalled();
+    });
+
+    it('skips a duplicate event without reprocessing', async () => {
+      mockPrisma.stripeEvent.create.mockRejectedValue({ code: 'P2002' });
+
+      const res = await service.handleWebhook(rawBody, sig);
+
+      expect(res).toEqual({ received: true });
+      expect(mockPrisma.tenant.update).not.toHaveBeenCalled();
+    });
+
+    it('drops the marker when processing fails so Stripe can retry', async () => {
+      mockPrisma.stripeEvent.create.mockResolvedValue({ id: event.id });
+      mockPrisma.tenant.findFirst.mockRejectedValue(new Error('db down'));
+      mockPrisma.stripeEvent.delete.mockResolvedValue({});
+
+      await expect(service.handleWebhook(rawBody, sig)).rejects.toThrow('db down');
+      expect(mockPrisma.stripeEvent.delete).toHaveBeenCalledWith({
+        where: { id: 'evt_123' },
+      });
+    });
+  });
+
+  // ─── onSubscriptionUpdated (plan from current price) ─────────────────────────
+
+  describe('onSubscriptionUpdated', () => {
+    beforeEach(() => {
+      mockPrisma.tenant.update.mockResolvedValue({});
+      mockPrisma.tenant.findUnique.mockResolvedValue({ stripeSubscriptionId: 'sub_1' });
+    });
+
+    it('ignores events about a subscription that is no longer the current one', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({ stripeSubscriptionId: 'sub_new' });
+
+      await (service as any).onSubscriptionUpdated({
+        id: 'sub_old',
+        metadata: { tenantId: TENANT_ID },
+        status: 'canceled',
+        items: { data: [] },
+      });
+      await (service as any).onSubscriptionDeleted({
+        id: 'sub_old',
+        metadata: { tenantId: TENANT_ID },
+      });
+
+      expect(mockPrisma.tenant.update).not.toHaveBeenCalled();
+    });
+
+    it('applies the deletion of the current subscription', async () => {
+      await (service as any).onSubscriptionDeleted({
+        id: 'sub_1',
+        metadata: { tenantId: TENANT_ID },
+      });
+
+      expect(mockPrisma.tenant.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ planStatus: 'cancelled', stripeSubscriptionId: null }),
+        }),
+      );
+    });
+
+    it('derives the plan from the current price, ignoring stale metadata', async () => {
+      const subscription = {
+        id: 'sub_1',
+        metadata: { tenantId: TENANT_ID, plan: 'basic' }, // stale (from checkout)
+        status: 'active',
+        items: { data: [{ price: { id: 'price_professional' } }] },
+      };
+
+      await (service as any).onSubscriptionUpdated(subscription);
+
+      expect(mockPrisma.tenant.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ plan: 'professional', maxEmployees: 5 }),
+        }),
+      );
+    });
+
+    it('falls back to metadata when the price is unknown', async () => {
+      const subscription = {
+        id: 'sub_1',
+        metadata: { tenantId: TENANT_ID, plan: 'business' },
+        status: 'active',
+        items: { data: [{ price: { id: 'price_unknown' } }] },
+      };
+
+      await (service as any).onSubscriptionUpdated(subscription);
+
+      expect(mockPrisma.tenant.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ plan: 'business', maxEmployees: 20 }),
+        }),
+      );
     });
   });
 
@@ -154,9 +284,10 @@ describe('BillingService', () => {
         maxEmployees: 5,
       });
 
+      // Basil+ API versions: the period lives on the subscription items.
       const mockSubscription = {
         status: 'active',
-        current_period_end: 1750000000,
+        items: { data: [{ current_period_end: 1750000000 }] },
         cancel_at_period_end: false,
       };
       stripe.subscriptions.retrieve.mockResolvedValue(mockSubscription);
@@ -164,6 +295,7 @@ describe('BillingService', () => {
       const result = await service.getBillingStatus(TENANT_ID);
 
       expect(stripe.subscriptions.retrieve).toHaveBeenCalledWith('sub_123');
+      expect(result.currentPeriodEnd).toEqual(new Date(1750000000 * 1000));
       expect(result.hasActiveSubscription).toBe(true);
       expect(result.cancelAtPeriodEnd).toBe(false);
     });

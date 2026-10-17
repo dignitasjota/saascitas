@@ -9,7 +9,12 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { BookingService } from './booking.service';
-import { CreateBookingDto } from './dto/booking.dto';
+import {
+  CancelBookingDto,
+  CreateBookingDto,
+  PublicEmployeesQueryDto,
+  PublicSlotsQueryDto,
+} from './dto/booking.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { Throttle } from '@nestjs/throttler';
 
@@ -33,7 +38,7 @@ export class BookingController {
   @Get(':slug/employees')
   async getEmployees(
     @Param('slug') slug: string,
-    @Query('serviceId') serviceId?: string,
+    @Query() { serviceId }: PublicEmployeesQueryDto,
   ) {
     const data = await this.bookingService.getPublicEmployees(slug, serviceId);
     return { data };
@@ -42,9 +47,7 @@ export class BookingController {
   @Get(':slug/slots')
   async getSlots(
     @Param('slug') slug: string,
-    @Query('employeeId') employeeId: string,
-    @Query('date') date: string,
-    @Query('serviceId') serviceId: string,
+    @Query() { employeeId, date, serviceId }: PublicSlotsQueryDto,
   ) {
     const data = await this.bookingService.getAvailableSlots(
       slug,
@@ -76,9 +79,9 @@ export class BookingController {
   @HttpCode(HttpStatus.OK)
   async cancelBooking(
     @Param('token') token: string,
-    @Body('reason') reason?: string,
+    @Body() dto: CancelBookingDto,
   ) {
-    const data = await this.bookingService.cancelBooking(token, reason);
+    const data = await this.bookingService.cancelBooking(token, dto.reason);
     return { data };
   }
 }

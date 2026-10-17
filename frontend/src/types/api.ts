@@ -29,8 +29,8 @@ export interface Tenant {
   slug: string
   email: string
   phone?: string
-  plan: 'basic' | 'professional' | 'premium'
-  planStatus: 'trialing' | 'active' | 'past_due' | 'cancelled'
+  plan: 'basic' | 'professional' | 'business'
+  planStatus: 'trialing' | 'active' | 'past_due' | 'cancelled' | 'paused'
   trialEndsAt?: string
 }
 
@@ -45,6 +45,7 @@ export interface Employee {
   specialties: string[]
   isActive: boolean
   createdAt: string
+  employeeServices?: { serviceId: string }[]
 }
 
 export interface Service {
