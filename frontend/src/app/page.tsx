@@ -161,6 +161,13 @@ export default function LandingPage() {
               </div>
             ))}
           </div>
+          <p className="text-center text-sm text-gray-500 mt-10">
+            ¿Más de 20 empleados?{' '}
+            <a href="mailto:soporte@saascitas.com?subject=Plan a medida" className="font-medium text-blue-600 hover:underline">
+              Contacta con nosotros
+            </a>{' '}
+            y te preparamos un plan a medida.
+          </p>
         </div>
       </section>
 
@@ -294,7 +301,7 @@ const plans = [
     highlight: false,
     features: [
       'Citas ilimitadas',
-      'Empleados ilimitados',
+      'Hasta 20 empleados',
       'API acceso',
       'Integraciones (Zapier, etc.)',
       'Manager de cuenta dedicado',

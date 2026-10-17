@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import {
   NotFoundException,
   ConflictException,
+  ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
@@ -53,7 +54,9 @@ describe('AppointmentsService', () => {
       update: jest.fn(),
       updateMany: jest.fn(),
       findUniqueOrThrow: jest.fn(),
+      count: jest.fn(),
     },
+    tenant: { findUnique: jest.fn() },
     service: { findFirst: jest.fn() },
     employee: { findFirst: jest.fn() },
     customer: {
@@ -78,6 +81,9 @@ describe('AppointmentsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // Default: unlimited plan, nothing booked this month.
+    mockPrisma.tenant.findUnique.mockResolvedValue({ plan: 'professional', timezone: 'Europe/Madrid' });
+    mockPrisma.appointment.count.mockResolvedValue(0);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -205,6 +211,14 @@ describe('AppointmentsService', () => {
           }),
         }),
       );
+    });
+
+    it('enforces the monthly appointment quota of the plan', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({ plan: 'basic', timezone: 'Europe/Madrid' });
+      mockPrisma.appointment.count.mockResolvedValue(100);
+
+      await expect(service.create(TENANT, dto)).rejects.toThrow(ForbiddenException);
+      expect(mockPrisma.appointment.create).not.toHaveBeenCalled();
     });
 
     it('queues the 24h reminder for manual appointments', async () => {

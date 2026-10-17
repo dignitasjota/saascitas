@@ -9,6 +9,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { AvailabilityService } from './availability.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { isOverlapConstraintViolation } from '../../common/utils/prisma-errors';
+import { assertMonthlyAppointmentQuota } from '../../common/utils/plan-limits';
 import {
   todayInTz,
   startOfDayUtc,
@@ -129,6 +130,9 @@ export class AppointmentsService {
     const startsAt = new Date(dto.startsAt);
     const endsAt = new Date(startsAt.getTime() + durationMinutes * 60 * 1000);
 
+    // Plan quota (e.g. 100 appointments/month on Basic)
+    await assertMonthlyAppointmentQuota(this.prisma, tenantId, startsAt);
+
     // Check for conflicts
     const isAvailable = await this.availabilityService.isSlotAvailable(
       tenantId,
@@ -227,6 +231,9 @@ export class AppointmentsService {
 
     // If time changed, check for conflicts
     if (timeChanged) {
+      // Moving it to another month must fit that month's plan quota.
+      await assertMonthlyAppointmentQuota(this.prisma, tenantId, startsAt, id);
+
       const isAvailable = await this.availabilityService.isSlotAvailable(
         tenantId,
         existing.employeeId,

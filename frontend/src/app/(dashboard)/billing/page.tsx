@@ -14,6 +14,7 @@ import {
   Loader2,
   AlertTriangle,
   CalendarClock,
+  CalendarDays,
   Users,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
@@ -37,7 +38,10 @@ interface BillingStatus {
   hasActiveSubscription: boolean
   currentPeriodEnd: string | null
   cancelAtPeriodEnd: boolean
+  monthlyAppointments?: { month: string; used: number; limit: number | null }
 }
+
+const SALES_EMAIL = 'soporte@saascitas.com'
 
 // ─── Plan definitions ────────────────────────────────────────────────────────
 
@@ -58,6 +62,7 @@ const PLANS: {
     maxEmployees: 1,
     features: [
       '1 empleado',
+      'Hasta 100 citas/mes',
       'Reservas online',
       'Notificaciones por email',
       'Panel de métricas',
@@ -338,6 +343,12 @@ export default function BillingPage() {
                     <Users className="h-4 w-4" />
                     Hasta {billing.maxEmployees} empleado{billing.maxEmployees !== 1 ? 's' : ''}
                   </span>
+                  {billing.monthlyAppointments?.limit != null && (
+                    <span className="flex items-center gap-1">
+                      <CalendarDays className="h-4 w-4" />
+                      {billing.monthlyAppointments.used} / {billing.monthlyAppointments.limit} citas este mes
+                    </span>
+                  )}
                   {billing.trialEndsAt && billing.planStatus === 'trialing' && (
                     <span className="flex items-center gap-1">
                       <CalendarClock className="h-4 w-4" />
@@ -378,6 +389,15 @@ export default function BillingPage() {
             </div>
           )}
 
+          {billing.monthlyAppointments?.limit != null &&
+            billing.monthlyAppointments.used >= billing.monthlyAppointments.limit && (
+              <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-700 text-sm">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                Has alcanzado las {billing.monthlyAppointments.limit} citas de este mes. No se aceptan más
+                reservas online hasta el mes que viene; mejora tu plan para tener citas ilimitadas.
+              </div>
+            )}
+
           {billing.planStatus === 'past_due' && (
             <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-red-700 text-sm">
               <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -403,6 +423,14 @@ export default function BillingPage() {
           ))}
         </div>
       </div>
+
+      <p className="text-center text-sm text-muted-foreground">
+        ¿Necesitas más de 20 empleados?{' '}
+        <a href={`mailto:${SALES_EMAIL}?subject=Plan a medida`} className="underline hover:text-foreground">
+          Contacta con nosotros
+        </a>{' '}
+        y te preparamos un plan a medida.
+      </p>
 
       {/* Manage from portal note */}
       {billing?.hasActiveSubscription && (

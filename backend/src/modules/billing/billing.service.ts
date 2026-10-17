@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
+import { getMonthlyAppointmentUsage } from '../../common/utils/plan-limits';
 
 import { PLAN_MAX_EMPLOYEES, PlanKey } from '../../common/constants/plans';
 
@@ -73,11 +74,14 @@ export class BillingService {
     // subscription items, not on the subscription itself.
     const periodEnd = subscription?.items?.data?.[0]?.current_period_end;
 
+    const monthlyAppointments = await getMonthlyAppointmentUsage(this.prisma, tenantId);
+
     return {
       plan: tenant.plan,
       planStatus: tenant.planStatus,
       trialEndsAt: tenant.trialEndsAt,
       maxEmployees: tenant.maxEmployees,
+      monthlyAppointments,
       hasActiveSubscription: !!subscription && subscription.status === 'active',
       currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
       cancelAtPeriodEnd: subscription?.cancel_at_period_end ?? false,

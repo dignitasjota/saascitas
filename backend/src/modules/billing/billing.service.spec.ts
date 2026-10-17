@@ -16,6 +16,7 @@ const mockPrisma = {
     create: jest.fn(),
     delete: jest.fn(),
   },
+  appointment: { count: jest.fn().mockResolvedValue(0) },
 };
 
 const mockConfig = {

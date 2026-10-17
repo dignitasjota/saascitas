@@ -55,12 +55,12 @@ const SLOT = '10:00';
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockPrisma = {
-  tenant: { findFirst: jest.fn() },
+  tenant: { findFirst: jest.fn(), findUnique: jest.fn() },
   service: { findFirst: jest.fn() },
   employee: { findFirst: jest.fn(), findMany: jest.fn() },
   employeeService: { findFirst: jest.fn() },
   customer: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
-  appointment: { create: jest.fn(), update: jest.fn() },
+  appointment: { create: jest.fn(), update: jest.fn(), count: jest.fn() },
   bookingToken: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
   $transaction: jest.fn(),
 };
@@ -82,6 +82,9 @@ describe('BookingService', () => {
   let service: BookingService;
 
   beforeEach(async () => {
+    // Default: unlimited plan, nothing booked this month.
+    mockPrisma.tenant.findUnique.mockResolvedValue({ plan: 'professional', timezone: 'Europe/Madrid' });
+    mockPrisma.appointment.count.mockResolvedValue(0);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BookingService,
@@ -165,6 +168,18 @@ describe('BookingService', () => {
       );
 
       expect(result).toEqual(['09:00', '11:00']);
+    });
+
+    it('offers no slots once the month quota is used up', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({ plan: 'basic', timezone: 'Europe/Madrid' });
+      mockPrisma.appointment.count.mockResolvedValue(100);
+
+      const result = await service.getAvailableSlots(
+        TENANT.slug, EMPLOYEE.id, FUTURE_DATE, SERVICE.id,
+      );
+
+      expect(result).toEqual([]);
+      expect(mockAvailability.getAvailableSlots).not.toHaveBeenCalled();
     });
 
     it('passes correct duration to availability service', async () => {
@@ -357,6 +372,16 @@ describe('BookingService', () => {
       await service.createBooking(TENANT.slug, makeDto());
 
       expect(txCustomerUpdate.mock.calls[0][0].data.email).toBe(CUSTOMER_INPUT.email);
+    });
+
+    it('rejects with a customer-facing message when the month quota is used up', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({ plan: 'basic', timezone: 'Europe/Madrid' });
+      mockPrisma.appointment.count.mockResolvedValue(100);
+
+      await expect(service.createBooking(TENANT.slug, makeDto())).rejects.toThrow(
+        'Este negocio no admite más reservas online este mes',
+      );
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('queues confirmation and reminder notifications', async () => {

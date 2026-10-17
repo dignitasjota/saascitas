@@ -15,6 +15,10 @@ import {
   isUniqueViolation,
 } from '../../common/utils/prisma-errors';
 import { zonedWallTimeToUtc } from '../../common/utils/timezone';
+import { getMonthlyAppointmentUsage } from '../../common/utils/plan-limits';
+
+const MONTH_FULL_MESSAGE =
+  'Este negocio no admite más reservas online este mes. Contacta directamente con él.';
 import { CreateBookingDto } from './dto/booking.dto';
 
 @Injectable()
@@ -130,6 +134,14 @@ export class BookingService {
 
     if (!service) throw new NotFoundException('Service not found');
 
+    // No slots to offer once the month's plan quota is used up.
+    const usage = await getMonthlyAppointmentUsage(
+      this.prisma,
+      tenant.id,
+      zonedWallTimeToUtc(date, '12:00', tenant.timezone),
+    );
+    if (usage.limit !== null && usage.used >= usage.limit) return [];
+
     const slots = await this.availabilityService.getAvailableSlots(
       tenant.id,
       employeeId,
@@ -211,6 +223,13 @@ export class BookingService {
       throw new BadRequestException(
         `Bookings cannot be made more than ${maxAdvanceDays} days in advance`,
       );
+    }
+
+    // Plan quota (e.g. 100 appointments/month on Basic). The visitor gets a
+    // customer-facing message, not the owner's "upgrade your plan" one.
+    const usage = await getMonthlyAppointmentUsage(this.prisma, tenant.id, startsAt);
+    if (usage.limit !== null && usage.used >= usage.limit) {
+      throw new ConflictException(MONTH_FULL_MESSAGE);
     }
 
     // Validate the slot against real availability (working hours, schedule
