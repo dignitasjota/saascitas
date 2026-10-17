@@ -89,6 +89,8 @@ model Tenant {
   plan                   SubscriptionPlan   @default(basic)
   planStatus             SubscriptionStatus @default(trialing) @map("plan_status")
   trialEndsAt            DateTime?          @map("trial_ends_at") @db.Timestamptz
+  // Set when the "your trial ends in N days" email was sent (avoids repeats).
+  trialReminderSentAt    DateTime?          @map("trial_reminder_sent_at") @db.Timestamptz
   stripeCustomerId       String?            @map("stripe_customer_id") @db.VarChar(255)
   stripeSubscriptionId   String?            @map("stripe_subscription_id") @db.VarChar(255)
 

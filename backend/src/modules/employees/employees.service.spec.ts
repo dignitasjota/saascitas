@@ -8,7 +8,7 @@ const EMPLOYEE = { id: 'emp-1', tenantId: TENANT_ID, firstName: 'Carlos', lastNa
 
 const mockPrisma = {
   tenant: { findUnique: jest.fn() },
-  employee: { findFirst: jest.fn(), count: jest.fn(), create: jest.fn() },
+  employee: { findFirst: jest.fn(), count: jest.fn(), create: jest.fn(), update: jest.fn() },
   service: { count: jest.fn(), findMany: jest.fn() },
   employeeService: {
     deleteMany: jest.fn(),
@@ -62,6 +62,41 @@ describe('EmployeesService', () => {
         service.create(TENANT_ID, { firstName: 'A', lastName: 'B' } as any),
       ).rejects.toThrow(BadRequestException);
       expect(mockPrisma.employee.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('limit on active employees', () => {
+    it('counts only active employees when creating', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({ maxEmployees: 1 });
+      mockPrisma.employee.count.mockResolvedValue(0);
+      mockPrisma.employee.create.mockResolvedValue(EMPLOYEE);
+      mockPrisma.service.findMany.mockResolvedValue([]);
+
+      await service.create(TENANT_ID, { firstName: 'A', lastName: 'B' } as any);
+
+      expect(mockPrisma.employee.count).toHaveBeenCalledWith({
+        where: { tenantId: TENANT_ID, isActive: true, deletedAt: null },
+      });
+    });
+
+    it('rejects reactivating an employee above the plan limit', async () => {
+      mockPrisma.employee.findFirst.mockResolvedValue({ ...EMPLOYEE, isActive: false });
+      mockPrisma.tenant.findUnique.mockResolvedValue({ maxEmployees: 1 });
+      mockPrisma.employee.count.mockResolvedValue(1);
+
+      await expect(
+        service.update(TENANT_ID, 'emp-1', { isActive: true }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.employee.update).not.toHaveBeenCalled();
+    });
+
+    it('allows deactivating, and reactivating when there is room', async () => {
+      mockPrisma.employee.findFirst.mockResolvedValue({ ...EMPLOYEE, isActive: false });
+      mockPrisma.tenant.findUnique.mockResolvedValue({ maxEmployees: 1 });
+      mockPrisma.employee.count.mockResolvedValue(0);
+
+      await service.update(TENANT_ID, 'emp-1', { isActive: true });
+      expect(mockPrisma.employee.update).toHaveBeenCalled();
     });
   });
 

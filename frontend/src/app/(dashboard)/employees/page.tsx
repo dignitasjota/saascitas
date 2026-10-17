@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorState } from '@/components/ui/error-state'
-import { useEmployees, useCreateEmployee, useSetEmployeeServices } from '@/hooks/use-employees'
+import { useEmployees, useCreateEmployee, useSetEmployeeServices, useUpdateEmployee } from '@/hooks/use-employees'
 import { useServices } from '@/hooks/use-services'
 import type { Employee } from '@/types/api'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -35,6 +35,7 @@ export default function EmployeesPage() {
   const { data: employees = [], isLoading, isError, refetch } = useEmployees()
   const { data: services = [] } = useServices()
   const serviceName = new Map(services.map(s => [s.id, s.name]))
+  const updateEmployee = useUpdateEmployee()
 
   return (
     <div className="space-y-5">
@@ -100,9 +101,21 @@ export default function EmployeesPage() {
                       .filter(Boolean)
                       .join(' · ')}
               </p>
-              <Button size="sm" variant="outline" onClick={() => setEditingServices(e)}>
-                Servicios
-              </Button>
+              <div className="flex shrink-0 gap-2">
+                <Button size="sm" variant="outline" onClick={() => setEditingServices(e)}>
+                  Servicios
+                </Button>
+                {/* Inactive employees keep their data and booked appointments but
+                    receive no new bookings. Reactivating respects the plan limit. */}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={updateEmployee.isPending}
+                  onClick={() => updateEmployee.mutate({ id: e.id, data: { isActive: !e.isActive } })}
+                >
+                  {e.isActive ? 'Desactivar' : 'Activar'}
+                </Button>
+              </div>
             </div>
           </div>
         ))}

@@ -19,3 +19,9 @@ export const PLAN_MAX_MONTHLY_APPOINTMENTS: Record<PlanKey, number | null> = {
   professional: null,
   business: null,
 };
+
+/** Free trial: the Professional plan for this many days, no card required. */
+export const TRIAL_DAYS = 14;
+
+/** Days before the end of the trial when the reminder email is sent. */
+export const TRIAL_REMINDER_DAYS = 3;

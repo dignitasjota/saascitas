@@ -19,6 +19,7 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { generateUniqueSlug } from '../../common/utils/slug';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
+import { PLAN_MAX_EMPLOYEES, TRIAL_DAYS } from '../../common/constants/plans';
 
 const RESET_TOKEN_TTL = 60 * 60; // 1 hour in seconds
 const RESET_KEY_PREFIX = 'pwd_reset:';
@@ -78,7 +79,13 @@ export class AuthService {
             slug,
             email: dto.email.toLowerCase(),
             phone: dto.phone,
-            trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days
+            // 14-day trial of the Professional plan, no card. When it ends
+            // without a subscription the tenant drops to the free Basic plan
+            // (see TrialsService).
+            plan: 'professional',
+            planStatus: 'trialing',
+            maxEmployees: PLAN_MAX_EMPLOYEES.professional,
+            trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000),
           },
         });
 

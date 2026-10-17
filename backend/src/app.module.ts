@@ -20,6 +20,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { TrialsModule } from './modules/trials/trials.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { AdminModule } from './modules/admin/admin.module';
     MetricsModule,
     BillingModule,
     AdminModule,
+    TrialsModule,
   ],
   controllers: [HealthController],
   providers: [

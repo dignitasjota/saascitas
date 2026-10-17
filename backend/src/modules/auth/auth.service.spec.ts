@@ -186,6 +186,26 @@ describe('AuthService', () => {
       expect(result.refreshToken).toBeDefined();
     });
 
+    it('starts a 14-day trial of the Professional plan', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      const tenantCreate = jest.fn().mockResolvedValue(mockTenant());
+      mockPrisma.$transaction.mockImplementation(async (fn: any) =>
+        fn({
+          tenant: { create: tenantCreate },
+          employee: { create: jest.fn().mockResolvedValue({ id: 'emp-1' }) },
+          user: { create: jest.fn().mockResolvedValue(mockUser()) },
+        }),
+      );
+
+      await service.register(dto);
+
+      const data = tenantCreate.mock.calls[0][0].data;
+      expect(data).toMatchObject({ plan: 'professional', planStatus: 'trialing', maxEmployees: 5 });
+      const days = (data.trialEndsAt.getTime() - Date.now()) / (24 * 3600 * 1000);
+      expect(days).toBeGreaterThan(13.99);
+      expect(days).toBeLessThanOrEqual(14);
+    });
+
     it('sends welcome email after successful registration (fire-and-forget)', async () => {
       mockPrisma.user.findFirst.mockResolvedValue(null);
 

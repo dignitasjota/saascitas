@@ -125,17 +125,22 @@ function PlanCard({
   onUpgrade,
   upgrading,
   hasSubscription,
+  trialing,
 }: {
   plan: (typeof PLANS)[number]
   current: PlanKey
   onUpgrade: (plan: PlanKey) => void
   upgrading: PlanKey | null
   hasSubscription: boolean
+  trialing: boolean
 }) {
   const isCurrent = plan.key === current
   const isLoading = upgrading === plan.key
 
-  const canUpgrade = !isCurrent && plan.key !== 'basic' && !hasSubscription
+  // During the free trial the current plan (Professional) is not paid yet,
+  // so it can still be contracted.
+  const canUpgrade =
+    plan.key !== 'basic' && !hasSubscription && (!isCurrent || trialing)
 
   return (
     <div
@@ -158,7 +163,7 @@ function PlanCard({
       {isCurrent && (
         <div className="absolute -top-3 left-1/2 -translate-x-1/2">
           <span className="bg-green-600 text-white text-xs font-semibold px-3 py-1 rounded-full">
-            Plan actual
+            {trialing ? 'En prueba' : 'Plan actual'}
           </span>
         </div>
       )}
@@ -294,6 +299,7 @@ export default function BillingPage() {
   }
 
   const currentPlan = billing?.plan ?? 'basic'
+  const isTrialing = billing?.planStatus === 'trialing' && !billing?.hasActiveSubscription
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
@@ -382,6 +388,18 @@ export default function BillingPage() {
             )}
           </div>
 
+          {isTrialing && billing.trialEndsAt && (
+            <div className="mt-4 flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-blue-800 text-sm">
+              <CalendarClock className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                Estás probando gratis el plan Profesional hasta el{' '}
+                {format(new Date(billing.trialEndsAt), "d 'de' MMMM", { locale: es })}. Si no
+                contratas, pasarás automáticamente al plan Básico gratuito (1 empleado y 100
+                citas al mes) sin perder ningún dato.
+              </span>
+            </div>
+          )}
+
           {billing.cancelAtPeriodEnd && (
             <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-700 text-sm">
               <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -419,6 +437,7 @@ export default function BillingPage() {
               onUpgrade={handleUpgrade}
               upgrading={upgrading}
               hasSubscription={billing?.hasActiveSubscription ?? false}
+              trialing={isTrialing}
             />
           ))}
         </div>

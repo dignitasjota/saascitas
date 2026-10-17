@@ -44,15 +44,9 @@ export class EmployeesService {
       where: { id: tenantId },
     });
 
-    const employeeCount = await this.prisma.employee.count({
-      where: { tenantId, deletedAt: null },
-    });
-
-    if (tenant && employeeCount >= tenant.maxEmployees) {
-      throw new BadRequestException(
-        `Your plan allows a maximum of ${tenant.maxEmployees} employee(s). Upgrade to add more.`,
-      );
-    }
+    // The plan limit is on ACTIVE employees: after a downgrade the extra
+    // ones are deactivated (kept, not deleted) and don't count.
+    await this.assertActiveEmployeeSlot(tenantId, tenant?.maxEmployees);
 
     // New employees offer every active service by default, so they are
     // bookable online straight away (the owner can narrow it down later).
@@ -89,12 +83,33 @@ export class EmployeesService {
   }
 
   async update(tenantId: string, id: string, dto: UpdateEmployeeDto) {
-    await this.findById(tenantId, id); // Verify exists + tenant
+    const employee = await this.findById(tenantId, id); // Verify exists + tenant
+
+    // Reactivating must fit the plan (e.g. Basic after the trial: 1 active).
+    if (dto.isActive === true && !employee.isActive) {
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { maxEmployees: true },
+      });
+      await this.assertActiveEmployeeSlot(tenantId, tenant?.maxEmployees);
+    }
 
     return this.prisma.employee.update({
       where: { id },
       data: dto,
     });
+  }
+
+  private async assertActiveEmployeeSlot(tenantId: string, maxEmployees?: number) {
+    if (maxEmployees === undefined) return;
+    const active = await this.prisma.employee.count({
+      where: { tenantId, isActive: true, deletedAt: null },
+    });
+    if (active >= maxEmployees) {
+      throw new BadRequestException(
+        `Tu plan permite ${maxEmployees} empleado(s) activo(s). Desactiva otro o mejora tu plan.`,
+      );
+    }
   }
 
   async remove(tenantId: string, id: string) {

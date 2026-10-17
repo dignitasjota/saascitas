@@ -43,7 +43,7 @@ export default function LandingPage() {
       <section className="pt-24 pb-20 px-6 text-center">
         <div className="mx-auto max-w-3xl">
           <span className="inline-block rounded-full bg-blue-50 px-4 py-1.5 text-xs font-semibold text-blue-700 mb-6">
-            14 días de prueba gratuita · Sin tarjeta de crédito
+            14 días gratis del plan Profesional · Sin tarjeta de crédito
           </span>
           <h1 className="text-5xl md:text-6xl font-extrabold leading-tight tracking-tight mb-6">
             Gestiona tus citas.<br />
@@ -239,7 +239,7 @@ const features = [
   {
     icon: Bell,
     title: 'Recordatorios automáticos',
-    desc: 'Envía confirmaciones y recordatorios por email y SMS para reducir las cancelaciones de última hora.',
+    desc: 'Envía confirmaciones y recordatorios por email para reducir las cancelaciones de última hora.',
     bg: 'bg-amber-50',
     color: 'text-amber-600',
   },
@@ -288,7 +288,7 @@ const plans = [
     features: [
       'Citas ilimitadas',
       'Hasta 5 empleados',
-      'Recordatorios SMS + email',
+      'Recordatorios por email',
       'Métricas avanzadas',
       'Exportación CSV',
       'Soporte prioritario',
@@ -313,7 +313,7 @@ const plans = [
 const faqs = [
   {
     q: '¿Necesito tarjeta de crédito para el periodo de prueba?',
-    a: 'No. Puedes probar SaaS Citas durante 14 días de forma completamente gratuita y sin introducir ningún dato de pago. Solo te pediremos la tarjeta si decides continuar al finalizar el periodo.',
+    a: 'No. Durante 14 días tienes el plan Profesional gratis y sin introducir ningún dato de pago. Si al terminar no contratas, pasas automáticamente al plan Básico gratuito sin perder nada; solo te pediremos la tarjeta si decides seguir con el Profesional.',
   },
   {
     q: '¿Puedo cancelar en cualquier momento?',
