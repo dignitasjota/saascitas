@@ -1,5 +1,7 @@
 # Auditoría y Hardening — julio 2026
 
+> Continúa en [Auditoría, correcciones y planes — octubre 2026](AUDIT_2026_10_FIXES_Y_PLANES.md).
+
 **Rama:** `fix/bloqueantes-despliegue` · **135 tests unit + 10 integración verdes** · `tsc` limpio · `next build` OK · 5 migraciones aplican limpias desde cero.
 
 Auditoría en profundidad del proyecto y corrección de los hallazgos. Este documento resume **qué cambió y por qué**; los detalles están en el historial de commits de la rama.
